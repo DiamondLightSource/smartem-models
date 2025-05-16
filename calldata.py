@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sun Nov 20 14:04:56 2022
+
+@author: jaehoon cha
+@email: jaehoon.cha@stfc.ac.uk
+"""
+from __future__ import print_function, division
+import torch
+import numpy as np
+from torch.utils.data import Dataset
+import os
+from PIL import Image
+import zipfile
+import re
+import scipy.io
+import gzip
+import random
+from torchvision import transforms
+
+def atoi(text):
+    return int(text) if text.isdigit() else text
+
+def natural_keys(text):
+    '''
+    alist.sort(key=natural_keys) sorts in human order
+    http://nedbatchelder.com/blog/200712/human_sorting.html
+    (See Toothy's implementation in the comments)
+    '''
+    return [ atoi(c) for c in re.split(r'(\d+)', text) ]
+
+class To1DTensor(object):
+    def __call__(self, sample):
+        return torch.from_numpy(sample)
+
+
+
+class smartem(Dataset):
+    def __init__(self, path_dir, data_name, grid_id = None):
+        self.data_path = os.path.join(path_dir, "{}.npz".format(data_name))
+        self.data_zip = np.load(self.data_path)
+        self.data = self.data_zip['imgs']  #-1~1
+        self.labs =  self.data_zip['labs']
+        
+        if grid_id != None:
+            idxs = np.where(self.labs == grid_id)[0]
+            self.data = self.data[idxs]
+            self.labs = self.labs[idxs]
+
+    def __len__(self):
+        return self.data.shape[0]
+
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+            
+        idx2 = random.randint(0, self.__len__()-1)
+        
+        sample = self.data[idx].astype(np.float32)
+        sample2 = self.data[idx2].astype(np.float32)
+        
+        sample = 2.*(sample/255.)-1.
+        sample2 = 2.*(sample2/255.)-1.
+
+        
+        sample = torch.from_numpy(np.expand_dims(sample, axis = 0))
+        sample2 = torch.from_numpy(np.expand_dims(sample2, axis = 0))
+        
+        labs = self.labs[idx]
+        
+        labs = torch.from_numpy(np.expand_dims(labs, axis = 0))
+       
+        
+
+        sample = {'x1':sample,
+                  'x2':sample2,
+                  'lab':labs}
+            
+        return sample
+    
+    
+    
