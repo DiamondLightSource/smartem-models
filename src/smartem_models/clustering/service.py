@@ -60,4 +60,12 @@ def initialise(params: InitParameters) -> None:
         losses += loss_record
         epoch_losses.append(epoch_loss)
 
+    model.eval()
+
+    latent_coords = {}
+    for sample in train_dataloader:
+        coords = model(sample["x1"])[0].detach().cpu().numpy()
+        for i, label in enumerate(sample["label"].detach().cpu().numpy().flatten()):
+            latent_coords[label] = coords[i]
+
     return None
