@@ -14,6 +14,8 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from smartem_models.utils import read_img
+
 
 def atoi(text):
     return int(text) if text.isdigit() else text
@@ -74,7 +76,8 @@ class smartem(Dataset):
 
 class SquareDataset(Dataset):
     def __init__(self, grid_squares: dict[int, Path]):
-        self.labels, self.imgs = zip(*grid_squares.items(), strict=True)
+        self.labels, self.img_paths = zip(*grid_squares.items(), strict=True)
+        self.imgs = [read_img(p) for p in self.img_paths]
 
     def __len__(self):
         return len(self.imgs)
