@@ -100,17 +100,17 @@ def bvae_loss(x, logits):
     return MSE.mean()
 
 
-def train(epoch, epoch_losses):
+def train(epoch: int, dataloader: DataLoader, inmodel: EIAE, inoptimizer: torch.optim.Adam, indevice: str):
     loss_record = []
     epoch_loss = 0.0
 
-    model.train()
-    for samples in tqdm(train_dataloader):
-        data, _ = Variable(samples["x1"]).to(device), Variable(samples["x1"]).to(device)
+    inmodel.train()
+    for samples in tqdm(dataloader):
+        data, _ = Variable(samples["x1"]).to(indevice), Variable(samples["x1"]).to(indevice)
 
-        optimizer.zero_grad()
+        inoptimizer.zero_grad()
 
-        outputs = model(data)
+        outputs = inmodel(data)
         loss = bvae_loss(data.detach().clone(), outputs)
 
         loss_record.append(loss.detach().cpu().numpy())
@@ -119,7 +119,7 @@ def train(epoch, epoch_losses):
         loss.backward()
         optimizer.step()
 
-    epoch_loss = epoch_loss / len(train_dataloader)
+    epoch_loss = epoch_loss / len(dataloader)
 
     print("Train Epoch: {}/{} Loss: {:.4f}".format(epoch, config["epochs"], loss.data))
     return loss_record, epoch_loss
@@ -141,7 +141,7 @@ def run():
     epoch_losses = [10**15]
 
     for epoch in range(config["epochs"]):
-        loss_record, epoch_loss = train(epoch, epoch_losses)
+        loss_record, epoch_loss = train(epoch, train_dataloader, model, optimizer, device)
         losses += loss_record
         epoch_losses.append(epoch_loss)
 
