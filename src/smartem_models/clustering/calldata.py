@@ -75,9 +75,10 @@ class smartem(Dataset):
 
 
 class SquareDataset(Dataset):
-    def __init__(self, grid_squares: dict[int, Path]):
+    def __init__(self, grid_squares: dict[int, Path], transform=None):
         self.labels, self.img_paths = zip(*grid_squares.items(), strict=True)
         self.imgs = [read_img(p) for p in self.img_paths]
+        self.transform = transform
 
     def __len__(self):
         return len(self.imgs)
@@ -96,6 +97,9 @@ class SquareDataset(Dataset):
 
         sample = torch.from_numpy(np.expand_dims(sample, axis=0))
         sample2 = torch.from_numpy(np.expand_dims(sample2, axis=0))
+        if self.transform:
+            sample = self.transform(sample)
+            sample2 = self.transform(sample2)
 
         labs = self.labels[idx]
 

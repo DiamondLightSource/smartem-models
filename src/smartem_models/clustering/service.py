@@ -7,6 +7,7 @@ from smartem_decisions.model.database import GridSquare
 from smartem_decisions.utils import setup_postgres_connection
 from sqlmodel import Session, select
 from torch.utils.data import DataLoader
+from torchvision import transforms
 
 from smartem_models.clustering.calldata import SquareDataset
 from smartem_models.clustering.grid_clustering import train
@@ -33,7 +34,7 @@ def initialise(params: InitParameters) -> None:
         return None
     square_imgs = {gs.id: Path(gs.gridsquare_img) for gs in grid_squares}
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    train_x = SquareDataset(square_imgs)
+    train_x = SquareDataset(square_imgs, transform=transforms.Resize(params.input_dim[-1], antialias=True))
     train_dataloader = DataLoader(train_x, batch_size=params.batch_size, shuffle=True, pin_memory=True)
 
     np.random.seed(params.seed)

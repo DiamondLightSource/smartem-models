@@ -5,13 +5,20 @@ import numpy as np
 import tifffile
 
 
-def read_img(img_path: Path, normalise: bool = True) -> np.array:
+def read_img(img_path: Path, normalise: bool = True, crop: tuple[int] | None = None) -> np.array:
     if img_path.suffix == ".mrc":
         data = mrcfile.read(img_path)
     elif img_path.suffix in (".tiff", ".tif"):
         data = tifffile.imread(img_path)
     else:
         raise ValueError(f"Input images must be in MRC or TIFF format. Format {img_path.suffix} unrecognised")
+    if not crop:
+        crop = (np.min(data.shape), np.min(data.shape))
+    left = (data.shape[0] - crop[0]) // 2
+    top = (data.shape[1] - crop[1]) // 2
+    right = left + crop[0]
+    bottom = top + crop[1]
+    data = data[left:right, top:bottom]
     if normalise:
         mean = np.mean(data)
         sdev = np.std(data)
