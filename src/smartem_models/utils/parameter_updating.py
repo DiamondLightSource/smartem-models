@@ -29,9 +29,9 @@ def init_distributions(grid: np.array, num_steps: int = 10) -> np.array:
     sdevs = np.nanstd(grid, axis=-1)
     # if there was only one (non-nan value in the array take the standard deviation to be 0.5
     sdevs = np.where(sdevs == 0, 0.5, sdevs)
-    dist_constructor = scipy.stats.truncnorm(loc=means, scale=sdevs, a=-means / sdevs, b=1 - (means / sdevs))
+    dist_constructor = scipy.stats.truncnorm(loc=means, scale=sdevs, a=-means / sdevs, b=(1 - means) / sdevs)
     res = np.zeros((num_steps, *means.shape))
     dist_step = 1 / num_steps
     for i in range(num_steps):
-        res[i] = dist_constructor(dist_step * i + (dist_step / 2))
+        res[i] = dist_constructor.pdf(dist_step * i + (dist_step / 2))
     return np.moveaxis(res, 0, -1)
