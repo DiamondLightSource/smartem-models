@@ -12,12 +12,12 @@ from collections import OrderedDict
 
 import numpy as np
 import torch
-from models import EIAE
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from smartem_models.clustering.calldata import smartem
+from smartem_models.clustering.models import EIAE
 
 
 def parse_args():
@@ -117,7 +117,7 @@ def train(epoch: int, dataloader: DataLoader, inmodel: EIAE, inoptimizer: torch.
 
         epoch_loss += loss.detach().cpu().numpy()
         loss.backward()
-        optimizer.step()
+        inoptimizer.step()
 
     epoch_loss = epoch_loss / len(dataloader)
 
