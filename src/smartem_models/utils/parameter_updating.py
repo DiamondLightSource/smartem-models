@@ -5,9 +5,7 @@ import scipy.stats
 
 
 def grid_hist(grid: tuple[tuple[float, float, float]], coords: list[tuple], values: list[float]) -> np.array:
-    if not all((g[1] - g[0]) % g[2] == 0 for g in grid):
-        raise ValueError
-    grid_shape = (int((g[1] - g[0]) / g[2]) for g in grid)
+    grid_shape = tuple(int((g[1] - g[0]) / g[2]) for g in grid)
     indices = np.arange(np.prod(grid_shape))
     unravelled_indices = np.unravel_index(indices, grid_shape)
     flattened_hist = [[] for _ in indices]
@@ -15,7 +13,7 @@ def grid_hist(grid: tuple[tuple[float, float, float]], coords: list[tuple], valu
     for i in indices:
         for j, coord in enumerate(coords):
             if j not in found_coord_indices:
-                ui = unravelled_indices[i]
+                ui = tuple(u[i] for u in unravelled_indices)
                 if all(x >= grid[n][0] + ui[n] * grid[n][2] for n, x in enumerate(coord)) and all(
                     x <= grid[n][0] + (ui[n] + 1) * grid[n][2] for n, x in enumerate(coord)
                 ):
@@ -63,10 +61,8 @@ def update_distributions(
     bin_dist = dist[index]
     step = 1 / len(bin_dist)
     midpoints = np.arange(step, 1 + step, step)
-    probs = np.array(
-        [step * p if (quality and p >= 0.5) or (not quality and p < 0.5) else (1 - step * p) for p in midpoints]
-    )
-    update_unnormalised = bin_dist * probs
+    probs = np.array([p if quality else 1 - p for p in midpoints])
+    update_unnormalised = bin_dist * probs * step
     update = update_unnormalised / np.sum(update_unnormalised)
     dist[index] = update / step
     return dist
