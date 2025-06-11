@@ -24,6 +24,7 @@ class InitParameters(BaseModel):
     latent_space_dim: int = 2
     learning_rate: float = 0.0005
     num_epochs: int = 1000
+    model_output_path: str = ""
 
 
 def initialise(params: InitParameters) -> None:
@@ -55,6 +56,7 @@ def initialise(params: InitParameters) -> None:
     losses = []
     epoch_losses = [10**15]
 
+    model.train()
     for epoch in range(params.num_epochs):
         loss_record, epoch_loss = train(epoch, train_dataloader, model, optimizer, device)
         losses += loss_record
@@ -67,5 +69,8 @@ def initialise(params: InitParameters) -> None:
         coords = model(sample["x1"])[0].detach().cpu().numpy()
         for i, label in enumerate(sample["label"].detach().cpu().numpy().flatten()):
             latent_coords[label] = coords[i]
+
+    if params.model_output_path:
+        torch.save(model.state_dict(), params.model_output_path)
 
     return None

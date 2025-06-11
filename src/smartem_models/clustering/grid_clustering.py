@@ -8,7 +8,6 @@ Created on Mon Jul  3 09:46:05 2023
 import torch
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 
 from smartem_models.clustering.models import EIAE
 
@@ -21,12 +20,12 @@ def bvae_loss(x, logits):
     return MSE.mean()
 
 
-def train(epoch: int, dataloader: DataLoader, inmodel: EIAE, inoptimizer: torch.optim.Adam, indevice: str):
+def train(dataloader: DataLoader, inmodel: EIAE, inoptimizer: torch.optim.Adam, indevice: str):
     loss_record = []
     epoch_loss = 0.0
 
     inmodel.train()
-    for samples in tqdm(dataloader):
+    for samples in dataloader:
         data, _ = Variable(samples["x1"]).to(indevice), Variable(samples["x1"]).to(indevice)
 
         inoptimizer.zero_grad()
@@ -42,5 +41,15 @@ def train(epoch: int, dataloader: DataLoader, inmodel: EIAE, inoptimizer: torch.
 
     epoch_loss = epoch_loss / len(dataloader)
 
-    print(f"Train Epoch: {epoch} Loss: {loss.data:.4f}")
     return loss_record, epoch_loss
+
+
+def get_recon_loss(dataloader: DataLoader, model: EIAE, device: str):
+    loss_record = 0.0
+    model.eval()
+    for samples in dataloader:
+        data, target = Variable(samples["x1"]).to(device), Variable(samples["x1"]).to(device)
+        output = model(data)
+        recons_loss = torch.sum((output - target) ** 2, axis=(1, 2, 3)).mean()
+        loss_record += recons_loss.detach().cpu().numpy()
+    return loss_record / len(dataloader)
