@@ -9,9 +9,10 @@ from sqlmodel import Session, select
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
-from smartem_models.clustering.calldata import SquareDataset
+from smartem_models.clustering.calldata import SquareDataset, prepare_image
 from smartem_models.clustering.grid_clustering import train
 from smartem_models.clustering.models import EIAE
+from smartem_models.utils import read_img
 
 
 class InitParameters(BaseModel):
@@ -74,3 +75,26 @@ def initialise(params: InitParameters) -> None:
         torch.save(model.state_dict(), params.model_output_path)
 
     return None
+
+
+class InferenceParameters(BaseModel):
+    model_path: Path
+    gridsquare_img_path: Path
+    input_dim: tuple[int] = (1, 64, 64)
+    hidden_dims: tuple[int] = (1, 16, 32, 64, 128)
+    latent_space_dim: int = 2
+
+
+def infer(params: InferenceParameters):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = EIAE(
+        alpha=torch.Tensor([[1.0, 1.0]]).to(device),
+        input_dims=params.input_dim,
+        hidden_dims=params.hidden_dims,
+        lat_dim=params.latent_space_dim,
+    )
+    model.load_state_dict(torch.load(params.model_path, weights_only=True, map_location=device))
+    model.eval()
+    img = transforms.Resize(params.input_dim[-1], antialias=True)(prepare_image(read_img(params.gridsquare_img_path)))
+    coords = model(img.unsqueeze(0))[2].detach().cpu().numpy()
+    return coords
