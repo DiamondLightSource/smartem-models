@@ -1,4 +1,5 @@
 import os
+from functools import lru_cache
 from pathlib import Path
 
 import mrcfile
@@ -7,6 +8,7 @@ import tifffile
 import yaml
 
 
+@lru_cache(maxsize=1)
 def get_config():
     config_path = os.getenv("SMARTEM_MODELS_CONFIGURATION")
     if not config_path:
