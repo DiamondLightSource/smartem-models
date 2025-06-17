@@ -67,7 +67,7 @@ def on_message(channel: Channel, method: Method, properties: BasicProperties, bo
             ]
             for hook in training_hooks:
                 params = TrainingParameters(grid_id=message["grid_id"])
-                if config.get("distributed"):
+                if config.get("distributed", {}).get("train", {}).get(hook.name):
                     try:
                         publish_request(
                             config.get("processing_queues", {}).get(hook.name, {}).get("train", ""),
@@ -75,7 +75,7 @@ def on_message(channel: Channel, method: Method, properties: BasicProperties, bo
                             params,
                         )
                     except ValueError:
-                        channel.basic_nack(devlivery_tag=method.delivery_tag, requeue=False)
+                        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
                 else:
                     hook.load()(params)
         case "infer":
@@ -88,7 +88,7 @@ def on_message(channel: Channel, method: Method, properties: BasicProperties, bo
                     magnification_scale=message["magnification_scale"],
                     model_weights_path=message.get("model_weights_path"),
                 )
-                if config.get("distributed"):
+                if config.get("distributed").get("infer", {}).get(hook.name):
                     try:
                         publish_request(
                             config.get("processing_queues", {}).get(hook.name, {}).get("infer", ""),
@@ -96,7 +96,7 @@ def on_message(channel: Channel, method: Method, properties: BasicProperties, bo
                             params,
                         )
                     except ValueError:
-                        channel.basic_nack(devlivery_tag=method.delivery_tag, requeue=False)
+                        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
                 else:
                     hook.load()(params)
         case "update":
@@ -107,7 +107,7 @@ def on_message(channel: Channel, method: Method, properties: BasicProperties, bo
                     gridsquare_id=message.get("gridsquare_id"),
                     foilhole_id=message.get("foilhole_id"),
                 )
-                if config.get("distributed"):
+                if config.get("distributed").get("update", {}).get(hook.name):
                     try:
                         publish_request(
                             config.get("processing_queues", {}).get(hook.name, {}).get("update", ""),
@@ -115,7 +115,7 @@ def on_message(channel: Channel, method: Method, properties: BasicProperties, bo
                             params,
                         )
                     except ValueError:
-                        channel.basic_nack(devlivery_tag=method.delivery_tag, requeue=False)
+                        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
                 else:
                     hook.load()(params)
         case _:
