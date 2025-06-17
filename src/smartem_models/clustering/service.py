@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from pydantic import BaseModel
-from smartem_decisions.model.database import GridSquare
+from smartem_decisions.model.database import GridSquare, QualityPredictionModelParameter
 from smartem_decisions.utils import setup_postgres_connection
 from sqlmodel import Session, select
 from torch.utils.data import DataLoader
@@ -13,6 +13,9 @@ from smartem_models.clustering.calldata import SquareDataset, prepare_image
 from smartem_models.clustering.grid_clustering import train
 from smartem_models.clustering.models import EIAE
 from smartem_models.utils import read_img
+from smartem_models.utils.parameter_updating_cluster import update_distributions
+
+model_name = "vae-square"
 
 
 class InitParameters(BaseModel):
@@ -98,3 +101,46 @@ def infer(params: InferenceParameters):
     img = transforms.Resize(params.input_dim[-1], antialias=True)(prepare_image(read_img(params.gridsquare_img_path)))
     coords = model(img.unsqueeze(0))[2].detach().cpu().numpy()
     return coords
+
+
+class UpdateParameters(BaseModel):
+    quality: bool
+    cluster_index: int
+    grid_id: int
+
+
+def _get_dist(grid_id: int, cluster_index: int, num_steps: int = 10) -> np.array:
+    engine = setup_postgres_connection()
+    with Session(engine) as session:
+        model_parameters = session.exec(
+            select(QualityPredictionModelParameter)
+            .where(QualityPredictionModelParameter.grid_id == grid_id)
+            .where(QualityPredictionModelParameter.prediction_model_name == model_name)
+            .where(QualityPredictionModelParameter.group == f"dist:{cluster_index}")
+        ).all()
+    dist = np.zeros(num_steps)
+    for mp in model_parameters:
+        dist[int(mp.key)] = mp.value
+    return dist
+
+
+def _record_dist(dist: np.array, grid_id: int, cluster_index: int, num_steps: int = 10) -> None:
+    engine = setup_postgres_connection()
+    with Session(engine) as session:
+        model_parameters = session.exec(
+            select(QualityPredictionModelParameter)
+            .where(QualityPredictionModelParameter.grid_id == grid_id)
+            .where(QualityPredictionModelParameter.prediction_model_name == model_name)
+            .where(QualityPredictionModelParameter.group == f"dist:{cluster_index}")
+        ).all()
+        for mp in model_parameters:
+            mp.value = dist[int(mp.key)]
+        session.add_all(model_parameters)
+        session.commit()
+    return None
+
+
+def update(params: UpdateParameters):
+    dist = _get_dist(params.grid_id, params.cluster_index)
+    dist = update_distributions(dist, params.cluster_index, params.quality)
+    _record_dist(dist, params.grid_id, params.cluster_index)
