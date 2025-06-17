@@ -20,7 +20,7 @@ def bvae_loss(x, logits):
     return MSE.mean()
 
 
-def train(dataloader: DataLoader, inmodel: EIAE, inoptimizer: torch.optim.Adam, indevice: str):
+def train(dataloader: DataLoader, inmodel: EIAE, inoptimizer: torch.optim.Adam, indevice: torch.device):
     loss_record = []
     epoch_loss = 0.0
 
@@ -44,7 +44,7 @@ def train(dataloader: DataLoader, inmodel: EIAE, inoptimizer: torch.optim.Adam, 
     return loss_record, epoch_loss
 
 
-def get_recon_loss(dataloader: DataLoader, model: EIAE, device: str):
+def get_recon_loss(dataloader: DataLoader, model: EIAE, device: torch.device):
     loss_record = 0.0
     model.eval()
     for samples in dataloader:

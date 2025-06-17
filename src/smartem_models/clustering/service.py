@@ -55,11 +55,11 @@ def initialise(params: InitParameters) -> None:
     optimizer = torch.optim.Adam(model.parameters(), lr=params.learning_rate, betas=(0.9, 0.999))
 
     losses = []
-    epoch_losses = [10**15]
+    epoch_losses: list[float] = [10**15]
 
     model.train()
-    for epoch in range(params.num_epochs):
-        loss_record, epoch_loss = train(epoch, train_dataloader, model, optimizer, device)
+    for _epoch in range(params.num_epochs):
+        loss_record, epoch_loss = train(train_dataloader, model, optimizer, device)
         losses += loss_record
         epoch_losses.append(epoch_loss)
 
@@ -80,8 +80,8 @@ def initialise(params: InitParameters) -> None:
 class InferenceParameters(BaseModel):
     model_path: Path
     gridsquare_img_path: Path
-    input_dim: tuple[int] = (1, 64, 64)
-    hidden_dims: tuple[int] = (1, 16, 32, 64, 128)
+    input_dim: tuple[int, ...] = (1, 64, 64)
+    hidden_dims: tuple[int, ...] = (1, 16, 32, 64, 128)
     latent_space_dim: int = 2
 
 
