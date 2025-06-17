@@ -138,7 +138,7 @@ def _get_dist(grid_id: int, cluster_index: int, num_steps: int = 10) -> np.array
     return dist
 
 
-def _record_dist(dist: np.array, grid_id: int, cluster_index: int, num_steps: int = 10) -> None:
+def _record_dist(dist: np.array, grid_id: int, cluster_index: int) -> None:
     engine = setup_postgres_connection()
     with Session(engine) as session:
         subquery = (
