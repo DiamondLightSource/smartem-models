@@ -125,8 +125,9 @@ def _get_dist(grid_id: int, cluster_index: int, num_steps: int = 10) -> np.array
             select(QualityPredictionModelParameter).join(
                 subquery,
                 and_(
-                    QualityPredictionModelParameter.grid_id == 1,
-                    QualityPredictionModelParameter.prediction_model_name == "test",
+                    QualityPredictionModelParameter.grid_id == grid_id,
+                    QualityPredictionModelParameter.prediction_model_name == model_name,
+                    QualityPredictionModelParameter.group == f"dist:{cluster_index}",
                     QualityPredictionModelParameter.timestamp == subquery.c.most_recent,
                 ),
             )
@@ -152,8 +153,9 @@ def _record_dist(dist: np.array, grid_id: int, cluster_index: int, num_steps: in
             select(QualityPredictionModelParameter).join(
                 subquery,
                 and_(
-                    QualityPredictionModelParameter.grid_id == 1,
-                    QualityPredictionModelParameter.prediction_model_name == "test",
+                    QualityPredictionModelParameter.grid_id == grid_id,
+                    QualityPredictionModelParameter.prediction_model_name == model_name,
+                    QualityPredictionModelParameter.group == f"dist:{cluster_index}",
                     QualityPredictionModelParameter.timestamp == subquery.c.most_recent,
                 ),
             )
