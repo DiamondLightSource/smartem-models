@@ -1,3 +1,4 @@
+import pickle
 from pathlib import Path
 
 import numpy as np
@@ -20,7 +21,11 @@ model_name = "vae-square"
 
 
 def _set_model_parameters(
-    dists: np.array, coords: list[tuple[str, tuple[float, float], int]], grid_uuid: str, model_weights_path: str
+    dists: np.array,
+    coords: list[tuple[str, tuple[float, float], int]],
+    grid_uuid: str,
+    model_weights_path: str,
+    kmeans_path: str,
 ) -> None:
     model_parameters = []
     for i, d in enumerate(dists):
@@ -72,6 +77,15 @@ def _set_model_parameters(
                 group="model_weights",
             )
         )
+        session.add(
+            QualityPredictionModelParameter(
+                grid_uuid=grid_uuid,
+                prediction_model_name=model_name,
+                key="path",
+                value=kmeans_path,
+                group="kmeans",
+            )
+        )
         session.commit()
     return None
 
@@ -87,6 +101,7 @@ class InitParameters(BaseModel):
     learning_rate: float = 0.0005
     num_epochs: int = 1000
     model_output_path: str = ""
+    kmeans_output_path: str = ""
 
 
 def initialise(params: InitParameters) -> None:
@@ -145,15 +160,55 @@ def initialise(params: InitParameters) -> None:
 
     if params.model_output_path:
         torch.save(model.state_dict(), params.model_output_path)
+    if params.kmeans_output_path:
+        with open(params.kmeans_output_path, "wb") as pkl:
+            pickle.dump(kmeans, pkl)
 
-    _set_model_parameters(init_dists, labelled_coords, params.grid_uuid, params.model_output_path)
+    _set_model_parameters(
+        init_dists, labelled_coords, params.grid_uuid, params.model_output_path, params.kmeans_output_path
+    )
 
     return None
 
 
+def _add_cluster_index(grid_uuid: str, cluster_index: int, gridsquare: str, coords: np.array) -> None:
+    coords_parameters = [
+        QualityPredictionModelParameter(
+            grid_uuid=grid_uuid,
+            prediction_model_name=model_name,
+            key="x",
+            group=f"coordinates:{gridsquare}",
+            value=coords[0],
+        ),
+        QualityPredictionModelParameter(
+            grid_uuid=grid_uuid,
+            prediction_model_name=model_name,
+            key="y",
+            group=f"coordinates:{gridsquare}",
+            value=coords[1],
+        ),
+    ]
+    cluster_parameter = QualityPredictionModelParameter(
+        grid_uuid=grid_uuid,
+        prediction_model_name=model_name,
+        key=gridsquare,
+        group="cluster_indices",
+        value=cluster_index,
+    )
+    engine = setup_postgres_connection()
+    with Session(engine) as session:
+        session.add_all(coords_parameters)
+        session.add(cluster_parameter)
+        session.commit()
+    return None
+
+
 class InferenceParameters(BaseModel):
+    grid_uuid: str
     model_path: Path
     gridsquare_img_path: Path
+    gridsquare_uuid: str
+    kmeans_path: str
     input_dim: tuple[int, ...] = (1, 64, 64)
     hidden_dims: tuple[int, ...] = (1, 16, 32, 64, 128)
     latent_space_dim: int = 2
@@ -171,6 +226,10 @@ def infer(params: InferenceParameters):
     model.eval()
     img = transforms.Resize(params.input_dim[-1], antialias=True)(prepare_image(read_img(params.gridsquare_img_path)))
     coords = model(img.unsqueeze(0))[2].detach().cpu().numpy()
+    with open(params.kmeans_path, "rb") as pkl:
+        kmeans = pickle.load(pkl)
+    cluster_index = kmeans.predict([coords])
+    _add_cluster_index(params.grid_uuid, cluster_index, params.gridsquare_uuid, coords)
     return coords
 
 
