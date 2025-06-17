@@ -5,7 +5,7 @@ import torch
 from pydantic import BaseModel
 from smartem_decisions.model.database import GridSquare, QualityPredictionModelParameter
 from smartem_decisions.utils import setup_postgres_connection
-from sqlmodel import Session, select
+from sqlmodel import Session, and_, func, select
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
@@ -112,11 +112,24 @@ class UpdateParameters(BaseModel):
 def _get_dist(grid_id: int, cluster_index: int, num_steps: int = 10) -> np.array:
     engine = setup_postgres_connection()
     with Session(engine) as session:
+        # need to deal with the timestamps here !!!!
+        subquery = (
+            select(
+                func.max(QualityPredictionModelParameter.timestamp).label("most_recent"),
+                QualityPredictionModelParameter.key,
+            )
+            .group_by(QualityPredictionModelParameter.key)
+            .subquery("most_recent")
+        )
         model_parameters = session.exec(
-            select(QualityPredictionModelParameter)
-            .where(QualityPredictionModelParameter.grid_id == grid_id)
-            .where(QualityPredictionModelParameter.prediction_model_name == model_name)
-            .where(QualityPredictionModelParameter.group == f"dist:{cluster_index}")
+            select(QualityPredictionModelParameter).join(
+                subquery,
+                and_(
+                    QualityPredictionModelParameter.grid_id == 1,
+                    QualityPredictionModelParameter.prediction_model_name == "test",
+                    QualityPredictionModelParameter.timestamp == subquery.c.most_recent,
+                ),
+            )
         ).all()
     dist = np.zeros(num_steps)
     for mp in model_parameters:
@@ -127,11 +140,23 @@ def _get_dist(grid_id: int, cluster_index: int, num_steps: int = 10) -> np.array
 def _record_dist(dist: np.array, grid_id: int, cluster_index: int, num_steps: int = 10) -> None:
     engine = setup_postgres_connection()
     with Session(engine) as session:
+        subquery = (
+            select(
+                func.max(QualityPredictionModelParameter.timestamp).label("most_recent"),
+                QualityPredictionModelParameter.key,
+            )
+            .group_by(QualityPredictionModelParameter.key)
+            .subquery("most_recent")
+        )
         model_parameters = session.exec(
-            select(QualityPredictionModelParameter)
-            .where(QualityPredictionModelParameter.grid_id == grid_id)
-            .where(QualityPredictionModelParameter.prediction_model_name == model_name)
-            .where(QualityPredictionModelParameter.group == f"dist:{cluster_index}")
+            select(QualityPredictionModelParameter).join(
+                subquery,
+                and_(
+                    QualityPredictionModelParameter.grid_id == 1,
+                    QualityPredictionModelParameter.prediction_model_name == "test",
+                    QualityPredictionModelParameter.timestamp == subquery.c.most_recent,
+                ),
+            )
         ).all()
         for mp in model_parameters:
             mp.value = dist[int(mp.key)]
