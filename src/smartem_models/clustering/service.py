@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from pydantic import BaseModel
+from sklearn.cluster import KMeans
 from smartem_decisions.model.database import GridSquare, QualityPredictionModelParameter
 from smartem_decisions.utils import setup_postgres_connection
 from sqlmodel import Session, and_, func, select
@@ -13,9 +14,58 @@ from smartem_models.clustering.calldata import SquareDataset, prepare_image
 from smartem_models.clustering.grid_clustering import train
 from smartem_models.clustering.models import EIAE
 from smartem_models.utils import read_img
-from smartem_models.utils.parameter_updating_cluster import update_distributions
+from smartem_models.utils.parameter_updating_cluster import init_distributions, update_distributions
 
 model_name = "vae-square"
+
+
+def _set_model_parameters(
+    dists: np.array, coords: list[tuple[str, tuple[float, float], int]], grid_id: int, model_weights_path: str
+) -> None:
+    model_parameters = []
+    for i, d in enumerate(dists):
+        model_parameters.extend(
+            [
+                QualityPredictionModelParameter(
+                    grid_id=grid_id, prediction_model_name=model_name, key=str(j), group=f"dist:{i}", value=d[j]
+                )
+                for j in range(len(d))
+            ]
+        )
+    coord_parameters = []
+    cluster_parameters = []
+    for c in coords:
+        coord_parameters.append(
+            QualityPredictionModelParameter(
+                grid_id=grid_id, prediction_model_name=model_name, key="x", group=f"coordinates:{c[0]}", value=c[1][0]
+            )
+        )
+        coord_parameters.append(
+            QualityPredictionModelParameter(
+                grid_id=grid_id, prediction_model_name=model_name, key="y", group=f"coordinates:{c[0]}", value=c[1][1]
+            )
+        )
+        cluster_parameters.append(
+            QualityPredictionModelParameter(
+                grid_id=grid_id, prediction_model_name=model_name, key=c[0], group="cluster_indices", value=c[2]
+            )
+        )
+    engine = setup_postgres_connection()
+    with Session(engine) as session:
+        session.add_all(model_parameters)
+        session.add_all(coord_parameters)
+        session.add_all(cluster_parameters)
+        session.add(
+            QualityPredictionModelParameter(
+                grid_id=grid_id,
+                prediction_model_name=model_name,
+                key="path",
+                value=model_weights_path,
+                group="model_weights",
+            )
+        )
+        session.commit()
+    return None
 
 
 class InitParameters(BaseModel):
@@ -74,8 +124,21 @@ def initialise(params: InitParameters) -> None:
         for i, label in enumerate(sample["label"].detach().cpu().numpy().flatten()):
             latent_coords[label] = coords[i]
 
+    num_clusters = len(latent_coords) // 5
+    labelled_coords = list(latent_coords.items())
+    kmeans = KMeans(n_clusters=num_clusters, random_state=0, n_init="auto").fit(
+        np.array([p[1] for p in labelled_coords])
+    )
+    labelled_coords = [(p[0], p[1], q) for p, q in zip(labelled_coords, kmeans.labels_, strict=False)]
+    hist = [[0.5 for p in labelled_coords if p[2] == label] for label in range(num_clusters)]
+    largest_cluster = np.max(len(p) for p in hist)
+    hist = [np.pad(p, (0, largest_cluster - len(p)), "constant", constant_values=(np.nan, np.nan)) for p in hist]
+    init_dists = init_distributions(hist)
+
     if params.model_output_path:
         torch.save(model.state_dict(), params.model_output_path)
+
+    _set_model_parameters(init_dists, labelled_coords, params.grid_id, params.model_output_path)
 
     return None
 
@@ -112,7 +175,6 @@ class UpdateParameters(BaseModel):
 def _get_dist(grid_id: int, cluster_index: int, num_steps: int = 10) -> np.array:
     engine = setup_postgres_connection()
     with Session(engine) as session:
-        # need to deal with the timestamps here !!!!
         subquery = (
             select(
                 func.max(QualityPredictionModelParameter.timestamp).label("most_recent"),
