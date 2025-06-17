@@ -16,7 +16,7 @@ def consume(func: Callable, queue_name: str, message_format: type[BaseModel]):
         try:
             func(message)
         except Exception:
-            channel.basic_nack(devlivery_tag=method.delivery_tag, requeue=False)
+            channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
         channel.basic_ack(delivery_tag=method.delivery_tag)
 
     con.consume(on_message, prefetch_count=1)
