@@ -1,29 +1,107 @@
+import pickle
 from pathlib import Path
 
 import numpy as np
 import torch
 from pydantic import BaseModel
-from smartem_decisions.model.database import GridSquare
+from sklearn.cluster import KMeans
+from smartem_decisions.model.database import GridSquare, QualityPrediction, QualityPredictionModelParameter
 from smartem_decisions.utils import setup_postgres_connection
-from sqlmodel import Session, select
+from sqlmodel import Session, and_, func, select
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
-from smartem_models.clustering.calldata import SquareDataset
+from smartem_models.clustering.calldata import SquareDataset, prepare_image
 from smartem_models.clustering.grid_clustering import train
 from smartem_models.clustering.models import EIAE
+from smartem_models.utils import read_img
+from smartem_models.utils.parameter_updating_cluster import init_distributions, score, update_distributions
+
+model_name = "vae-square"
+
+
+def _set_model_parameters(
+    dists: np.array,
+    coords: list[tuple[str, tuple[float, float], int]],
+    grid_uuid: str,
+    model_weights_path: str,
+    kmeans_path: str,
+) -> None:
+    model_parameters = []
+    for i, d in enumerate(dists):
+        model_parameters.extend(
+            [
+                QualityPredictionModelParameter(
+                    grid_uuid=grid_uuid, prediction_model_name=model_name, key=str(j), group=f"dist:{i}", value=d[j]
+                )
+                for j in range(len(d))
+            ]
+        )
+    coord_parameters = []
+    cluster_parameters = []
+    for c in coords:
+        coord_parameters.append(
+            QualityPredictionModelParameter(
+                grid_uuid=grid_uuid,
+                prediction_model_name=model_name,
+                key="x",
+                group=f"coordinates:{c[0]}",
+                value=c[1][0],
+            )
+        )
+        coord_parameters.append(
+            QualityPredictionModelParameter(
+                grid_uuid=grid_uuid,
+                prediction_model_name=model_name,
+                key="y",
+                group=f"coordinates:{c[0]}",
+                value=c[1][1],
+            )
+        )
+        cluster_parameters.append(
+            QualityPredictionModelParameter(
+                grid_uuid=grid_uuid, prediction_model_name=model_name, key=c[0], group="cluster_indices", value=c[2]
+            )
+        )
+    engine = setup_postgres_connection()
+    with Session(engine) as session:
+        session.add_all(model_parameters)
+        session.add_all(coord_parameters)
+        session.add_all(cluster_parameters)
+        session.add(
+            QualityPredictionModelParameter(
+                grid_uuid=grid_uuid,
+                prediction_model_name=model_name,
+                key="path",
+                value=model_weights_path,
+                group="model_weights",
+            )
+        )
+        session.add(
+            QualityPredictionModelParameter(
+                grid_uuid=grid_uuid,
+                prediction_model_name=model_name,
+                key="path",
+                value=kmeans_path,
+                group="kmeans",
+            )
+        )
+        session.commit()
+    return None
 
 
 class InitParameters(BaseModel):
-    grid_id: int
+    grid_uuid: str
     batch_size: int = 16
     seed: int = 10
     input_model: Path | None = None
-    input_dim: tuple[int] = (1, 64, 64)
-    hidden_dims: tuple[int] = (1, 16, 32, 64, 128)
+    input_dim: tuple[int, ...] = (1, 64, 64)
+    hidden_dims: tuple[int, ...] = (1, 16, 32, 64, 128)
     latent_space_dim: int = 2
     learning_rate: float = 0.0005
     num_epochs: int = 1000
+    model_output_path: str = ""
+    kmeans_output_path: str = ""
 
 
 def initialise(params: InitParameters) -> None:
@@ -53,10 +131,11 @@ def initialise(params: InitParameters) -> None:
     optimizer = torch.optim.Adam(model.parameters(), lr=params.learning_rate, betas=(0.9, 0.999))
 
     losses = []
-    epoch_losses = [10**15]
+    epoch_losses: list[float] = [10**15]
 
-    for epoch in range(params.num_epochs):
-        loss_record, epoch_loss = train(epoch, train_dataloader, model, optimizer, device)
+    model.train()
+    for _epoch in range(params.num_epochs):
+        loss_record, epoch_loss = train(train_dataloader, model, optimizer, device)
         losses += loss_record
         epoch_losses.append(epoch_loss)
 
@@ -68,4 +147,158 @@ def initialise(params: InitParameters) -> None:
         for i, label in enumerate(sample["label"].detach().cpu().numpy().flatten()):
             latent_coords[label] = coords[i]
 
+    num_clusters = len(latent_coords) // 5
+    labelled_coords = list(latent_coords.items())
+    kmeans = KMeans(n_clusters=num_clusters, random_state=0, n_init="auto").fit(
+        np.array([p[1] for p in labelled_coords])
+    )
+    labelled_coords = [(p[0], p[1], q) for p, q in zip(labelled_coords, kmeans.labels_, strict=False)]
+    hist = [[0.5 for p in labelled_coords if p[2] == label] for label in range(num_clusters)]
+    largest_cluster = np.max(len(p) for p in hist)
+    hist = [np.pad(p, (0, largest_cluster - len(p)), "constant", constant_values=(np.nan, np.nan)) for p in hist]
+    init_dists = init_distributions(hist)
+
+    if params.model_output_path:
+        torch.save(model.state_dict(), params.model_output_path)
+    if params.kmeans_output_path:
+        with open(params.kmeans_output_path, "wb") as pkl:
+            pickle.dump(kmeans, pkl)
+
+    _set_model_parameters(
+        init_dists, labelled_coords, params.grid_uuid, params.model_output_path, params.kmeans_output_path
+    )
+
+    return None
+
+
+def _add_cluster_index(grid_uuid: str, cluster_index: int, gridsquare: str, coords: np.array) -> None:
+    coords_parameters = [
+        QualityPredictionModelParameter(
+            grid_uuid=grid_uuid,
+            prediction_model_name=model_name,
+            key="x",
+            group=f"coordinates:{gridsquare}",
+            value=coords[0],
+        ),
+        QualityPredictionModelParameter(
+            grid_uuid=grid_uuid,
+            prediction_model_name=model_name,
+            key="y",
+            group=f"coordinates:{gridsquare}",
+            value=coords[1],
+        ),
+    ]
+    cluster_parameter = QualityPredictionModelParameter(
+        grid_uuid=grid_uuid,
+        prediction_model_name=model_name,
+        key=gridsquare,
+        group="cluster_indices",
+        value=cluster_index,
+    )
+    engine = setup_postgres_connection()
+    with Session(engine) as session:
+        session.add_all(coords_parameters)
+        session.add(cluster_parameter)
+        session.commit()
+    return None
+
+
+class InferenceParameters(BaseModel):
+    grid_uuid: str
+    model_path: Path
+    gridsquare_img_path: Path
+    gridsquare_uuid: str
+    kmeans_path: str
+    input_dim: tuple[int, ...] = (1, 64, 64)
+    hidden_dims: tuple[int, ...] = (1, 16, 32, 64, 128)
+    latent_space_dim: int = 2
+
+
+def infer(params: InferenceParameters):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = EIAE(
+        alpha=torch.Tensor([[1.0, 1.0]]).to(device),
+        input_dims=params.input_dim,
+        hidden_dims=params.hidden_dims,
+        lat_dim=params.latent_space_dim,
+    )
+    model.load_state_dict(torch.load(params.model_path, weights_only=True, map_location=device))
+    model.eval()
+    img = transforms.Resize(params.input_dim[-1], antialias=True)(prepare_image(read_img(params.gridsquare_img_path)))
+    coords = model(img.unsqueeze(0))[2].detach().cpu().numpy()
+    with open(params.kmeans_path, "rb") as pkl:
+        kmeans = pickle.load(pkl)
+    cluster_index = kmeans.predict([coords])
+    _add_cluster_index(params.grid_uuid, cluster_index, params.gridsquare_uuid, coords)
+    return coords
+
+
+def _get_dist(grid_uuid: str, cluster_index: int, num_steps: int = 10) -> np.array:
+    engine = setup_postgres_connection()
+    with Session(engine) as session:
+        subquery = (
+            select(
+                func.max(QualityPredictionModelParameter.timestamp).label("most_recent"),
+                QualityPredictionModelParameter.key,
+            )
+            .group_by(QualityPredictionModelParameter.key)
+            .subquery("most_recent")
+        )
+        model_parameters = session.exec(
+            select(QualityPredictionModelParameter).join(
+                subquery,
+                and_(
+                    QualityPredictionModelParameter.grid_uuid == grid_uuid,
+                    QualityPredictionModelParameter.prediction_model_name == model_name,
+                    QualityPredictionModelParameter.group == f"dist:{cluster_index}",
+                    QualityPredictionModelParameter.timestamp == subquery.c.most_recent,
+                ),
+            )
+        ).all()
+    dist = np.zeros(num_steps)
+    for mp in model_parameters:
+        dist[int(mp.key)] = mp.value
+    return dist
+
+
+def _record_dist(dist: np.array, grid_uuid: str, cluster_index: int) -> None:
+    model_parameters = [
+        QualityPredictionModelParameter(
+            grid_uuid=grid_uuid,
+            prediction_model_name=model_name,
+            key=str(j),
+            group=f"dist:{cluster_index}",
+            value=dist[j],
+        )
+        for j in range(len(dist))
+    ]
+    engine = setup_postgres_connection()
+    with Session(engine) as session:
+        session.add_all(model_parameters)
+        session.commit()
+    return None
+
+
+def _record_score(score: float, gridsquare_uuid: str) -> None:
+    prediction = QualityPrediction(gridsquare_uuid=gridsquare_uuid, prediction_model_name=model_name, value=score)
+    engine = setup_postgres_connection()
+    with Session(engine) as session:
+        session.add(prediction)
+        session.commit()
+    return None
+
+
+class UpdateParameters(BaseModel):
+    quality: bool
+    cluster_index: int
+    grid_uuid: str
+    gridsquare_uuid: str
+
+
+def update(params: UpdateParameters) -> None:
+    dist = _get_dist(params.grid_uuid, params.cluster_index)
+    dist = update_distributions(dist, params.cluster_index, params.quality)
+    _record_dist(dist, params.grid_uuid, params.cluster_index)
+    post_update_score = score(dist, params.cluster_index)
+    _record_score(post_update_score, params.gridsquare_uuid)
     return None

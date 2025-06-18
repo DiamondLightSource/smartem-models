@@ -1,8 +1,21 @@
+import os
+from functools import lru_cache
 from pathlib import Path
 
 import mrcfile
 import numpy as np
 import tifffile
+import yaml
+
+
+@lru_cache(maxsize=1)
+def get_config():
+    config_path = os.getenv("SMARTEM_MODELS_CONFIGURATION")
+    if not config_path:
+        raise ValueError("Failed to load configuration from environment variable SMARTEM_MODELS_CONFIGURATION")
+    with open(config_path) as stream:
+        config = yaml.safe_load(stream)
+    return config
 
 
 def read_img(img_path: Path, normalise: bool = True, crop: tuple[int] | None = None) -> np.array:
