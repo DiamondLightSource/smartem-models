@@ -15,14 +15,13 @@ def init_distributions(hist: np.array, num_steps: int = 10) -> np.array:
     return np.moveaxis(res, 0, -1)
 
 
-def update_distributions(dist: np.array, index: int, quality: bool) -> np.array:
-    bin_dist = dist[index]
-    step = 1 / len(bin_dist)
+def update_distribution(dist: np.array, quality: bool) -> np.array:
+    step = 1 / len(dist)
     midpoints = np.arange(step, 1 + step, step)
     probs = np.array([p if quality else 1 - p for p in midpoints])
-    update_unnormalised = bin_dist * probs * step
+    update_unnormalised = dist * probs * step
     update = update_unnormalised / np.sum(update_unnormalised)
-    dist[index] = update / step
+    dist = update / step
     return dist
 
 
