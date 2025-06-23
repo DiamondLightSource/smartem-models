@@ -8,6 +8,7 @@ from sklearn.cluster import KMeans
 from smartem_decisions.model.database import GridSquare, QualityPrediction, QualityPredictionModelParameter
 from smartem_decisions.utils import setup_postgres_connection
 from sqlmodel import Session, and_, func, select
+from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
@@ -15,7 +16,7 @@ from smartem_models.clustering.calldata import SquareDataset, prepare_image
 from smartem_models.clustering.grid_clustering import train
 from smartem_models.clustering.models import EIAE
 from smartem_models.utils import read_img
-from smartem_models.utils.parameter_updating_cluster import init_distributions, score, update_distributions
+from smartem_models.utils.parameter_updating_cluster import init_distributions, score, update_distribution
 
 model_name = "vae-square"
 
@@ -24,15 +25,17 @@ def _set_model_parameters(
     dists: np.array,
     coords: list[tuple[str, tuple[float, float], int]],
     grid_uuid: str,
-    model_weights_path: str,
-    kmeans_path: str,
 ) -> None:
     model_parameters = []
     for i, d in enumerate(dists):
         model_parameters.extend(
             [
                 QualityPredictionModelParameter(
-                    grid_uuid=grid_uuid, prediction_model_name=model_name, key=str(j), group=f"dist:{i}", value=d[j]
+                    grid_uuid=grid_uuid,
+                    prediction_model_name=model_name,
+                    key=str(j),
+                    group=f"dist:{i}",
+                    value=float(d[j]),
                 )
                 for j in range(len(d))
             ]
@@ -46,7 +49,7 @@ def _set_model_parameters(
                 prediction_model_name=model_name,
                 key="x",
                 group=f"coordinates:{c[0]}",
-                value=c[1][0],
+                value=float(c[1][0]),
             )
         )
         coord_parameters.append(
@@ -55,12 +58,16 @@ def _set_model_parameters(
                 prediction_model_name=model_name,
                 key="y",
                 group=f"coordinates:{c[0]}",
-                value=c[1][1],
+                value=float(c[1][1]),
             )
         )
         cluster_parameters.append(
             QualityPredictionModelParameter(
-                grid_uuid=grid_uuid, prediction_model_name=model_name, key=c[0], group="cluster_indices", value=c[2]
+                grid_uuid=grid_uuid,
+                prediction_model_name=model_name,
+                key=str(c[0]),
+                group="cluster_indices",
+                value=float(c[2]),
             )
         )
     engine = setup_postgres_connection()
@@ -68,24 +75,6 @@ def _set_model_parameters(
         session.add_all(model_parameters)
         session.add_all(coord_parameters)
         session.add_all(cluster_parameters)
-        session.add(
-            QualityPredictionModelParameter(
-                grid_uuid=grid_uuid,
-                prediction_model_name=model_name,
-                key="path",
-                value=model_weights_path,
-                group="model_weights",
-            )
-        )
-        session.add(
-            QualityPredictionModelParameter(
-                grid_uuid=grid_uuid,
-                prediction_model_name=model_name,
-                key="path",
-                value=kmeans_path,
-                group="kmeans",
-            )
-        )
         session.commit()
     return None
 
@@ -107,10 +96,10 @@ class InitParameters(BaseModel):
 def initialise(params: InitParameters) -> None:
     engine = setup_postgres_connection()
     with Session(engine) as session:
-        grid_squares = session.exec(select(GridSquare).where(GridSquare.grid_id == params.grid_id)).all()
+        grid_squares = session.exec(select(GridSquare).where(GridSquare.grid_uuid == params.grid_uuid)).all()
     if not all(gs.gridsquare_img for gs in grid_squares):
         return None
-    square_imgs = {gs.id: Path(gs.gridsquare_img) for gs in grid_squares}
+    square_imgs = {i: Path(gs.image_path) for i, gs in enumerate(grid_squares)}
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     train_x = SquareDataset(square_imgs, transform=transforms.Resize(params.input_dim[-1], antialias=True))
     train_dataloader = DataLoader(train_x, batch_size=params.batch_size, shuffle=True, pin_memory=True)
@@ -125,7 +114,7 @@ def initialise(params: InitParameters) -> None:
         lat_dim=params.latent_space_dim,
     )
     if params.input_model:
-        model.load_state_dict(torch.load(params.input_model, map_location=torch.device("cpu")))
+        model.load_state_dict(torch.load(params.input_model, map_location=device))
     model.to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=params.learning_rate, betas=(0.9, 0.999))
@@ -143,9 +132,9 @@ def initialise(params: InitParameters) -> None:
 
     latent_coords = {}
     for sample in train_dataloader:
-        coords = model(sample["x1"])[0].detach().cpu().numpy()
-        for i, label in enumerate(sample["label"].detach().cpu().numpy().flatten()):
-            latent_coords[label] = coords[i]
+        coords = model.encode(Variable(sample["x1"]).to(device))[0].detach().cpu().numpy()
+        for i, label in enumerate(sample["lab"].detach().cpu().numpy().flatten()):
+            latent_coords[grid_squares[label].uuid] = coords[i]
 
     num_clusters = len(latent_coords) // 5
     labelled_coords = list(latent_coords.items())
@@ -154,7 +143,7 @@ def initialise(params: InitParameters) -> None:
     )
     labelled_coords = [(p[0], p[1], q) for p, q in zip(labelled_coords, kmeans.labels_, strict=False)]
     hist = [[0.5 for p in labelled_coords if p[2] == label] for label in range(num_clusters)]
-    largest_cluster = np.max(len(p) for p in hist)
+    largest_cluster = np.max([len(p) for p in hist])
     hist = [np.pad(p, (0, largest_cluster - len(p)), "constant", constant_values=(np.nan, np.nan)) for p in hist]
     init_dists = init_distributions(hist)
 
@@ -164,9 +153,7 @@ def initialise(params: InitParameters) -> None:
         with open(params.kmeans_output_path, "wb") as pkl:
             pickle.dump(kmeans, pkl)
 
-    _set_model_parameters(
-        init_dists, labelled_coords, params.grid_uuid, params.model_output_path, params.kmeans_output_path
-    )
+    _set_model_parameters(init_dists, labelled_coords, params.grid_uuid)
 
     return None
 
@@ -236,25 +223,43 @@ def infer(params: InferenceParameters):
 def _get_dist(grid_uuid: str, cluster_index: int, num_steps: int = 10) -> np.array:
     engine = setup_postgres_connection()
     with Session(engine) as session:
-        subquery = (
-            select(
-                func.max(QualityPredictionModelParameter.timestamp).label("most_recent"),
-                QualityPredictionModelParameter.key,
-            )
-            .group_by(QualityPredictionModelParameter.key)
-            .subquery("most_recent")
-        )
-        model_parameters = session.exec(
-            select(QualityPredictionModelParameter).join(
-                subquery,
-                and_(
+        if (
+            session.exec(
+                select(func.count(QualityPredictionModelParameter.key)).where(
                     QualityPredictionModelParameter.grid_uuid == grid_uuid,
                     QualityPredictionModelParameter.prediction_model_name == model_name,
                     QualityPredictionModelParameter.group == f"dist:{cluster_index}",
-                    QualityPredictionModelParameter.timestamp == subquery.c.most_recent,
-                ),
+                )
+            ).all()[0]
+            == num_steps
+        ):
+            model_parameters = session.exec(
+                select(QualityPredictionModelParameter.key).where(
+                    QualityPredictionModelParameter.grid_uuid == grid_uuid,
+                    QualityPredictionModelParameter.prediction_model_name == model_name,
+                    QualityPredictionModelParameter.group == f"dist:{cluster_index}",
+                )
+            ).all()
+        else:
+            subquery = (
+                select(
+                    func.max(QualityPredictionModelParameter.timestamp).label("most_recent"),
+                    QualityPredictionModelParameter.key,
+                )
+                .group_by(QualityPredictionModelParameter.key)
+                .subquery("most_recent")
             )
-        ).all()
+            model_parameters = session.exec(
+                select(QualityPredictionModelParameter).join(
+                    subquery,
+                    and_(
+                        QualityPredictionModelParameter.grid_uuid == grid_uuid,
+                        QualityPredictionModelParameter.prediction_model_name == model_name,
+                        QualityPredictionModelParameter.group == f"dist:{cluster_index}",
+                        QualityPredictionModelParameter.timestamp == subquery.c.most_recent,
+                    ),
+                )
+            ).all()
     dist = np.zeros(num_steps)
     for mp in model_parameters:
         dist[int(mp.key)] = mp.value
@@ -262,6 +267,8 @@ def _get_dist(grid_uuid: str, cluster_index: int, num_steps: int = 10) -> np.arr
 
 
 def _record_dist(dist: np.array, grid_uuid: str, cluster_index: int) -> None:
+    if np.sum(dist) == 0:
+        return None
     model_parameters = [
         QualityPredictionModelParameter(
             grid_uuid=grid_uuid,
@@ -297,7 +304,7 @@ class UpdateParameters(BaseModel):
 
 def update(params: UpdateParameters) -> None:
     dist = _get_dist(params.grid_uuid, params.cluster_index)
-    dist = update_distributions(dist, params.cluster_index, params.quality)
+    dist = update_distribution(dist, params.quality)
     _record_dist(dist, params.grid_uuid, params.cluster_index)
     post_update_score = score(dist, params.cluster_index)
     _record_score(post_update_score, params.gridsquare_uuid)
