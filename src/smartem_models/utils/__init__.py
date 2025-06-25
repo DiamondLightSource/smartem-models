@@ -41,6 +41,7 @@ def read_img(img_path: Path, normalise: bool = True, crop: tuple[int] | None = N
         data[data < sigma_min] = sigma_min
         data[data > sigma_max] = sigma_max
         data = data - data.min()
-        data = data * 255 / data.max()
+        data = data / data.max()
+        data = data * 255
         data = data.astype("uint8")
     return data
