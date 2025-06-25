@@ -11,10 +11,10 @@ class FoilHoleDataset(Dataset):
     def __init__(
         self, grid_squares: dict[str, Path], foil_hole_positions: dict[str, list[tuple[int, int, int]]], transform=None
     ):
-        self.gs_imgs = {k: read_img(p) for k, p in grid_squares}
-        self.img_positons = []
+        self.gs_imgs = {k: read_img(p) for k, p in grid_squares.items()}
+        self.img_positions = []
         for k, v in foil_hole_positions.items():
-            self.img_positons.extend((k, fh) for fh in v)
+            self.img_positions.extend((k, fh) for fh in v)
 
         self.transform = transform
 
@@ -25,8 +25,8 @@ class FoilHoleDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        x, y, d = self.img_positons[idx][1]
-        image = self.gs_imgs[self.img_positons[idx][0]][x - d // 2 : x + d // 2, y - d // 2 : y + d // 2]
+        x, y, d = self.img_positions[idx][1]
+        image = self.gs_imgs[self.img_positions[idx][0]][y - d // 2 : y + d // 2, x - d // 2 : x + d // 2]
         # If image is grayscale, add a channel dimension.
         if image.ndim == 2:
             image = np.expand_dims(image, axis=0)

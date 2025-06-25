@@ -13,6 +13,7 @@ from smartem_models.regression.model import ResNetRegression
 
 
 class InitParameters(BaseModel):
+    grid_uuid: str
     model_weights_path: Path
     batch_size: int = 16
 
@@ -46,18 +47,14 @@ def initialise(params: InitParameters) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = ResNetRegression(freeze_base=True).to(device)
 
-    # -------------------------------
-    # 5. Load the Saved Model Weights
-    # -------------------------------
     model.load_state_dict(torch.load(params.model_weights_path, map_location=device))
     model.eval()
 
     predictions = []
     with torch.no_grad():
-        for imgs in loader:
+        for imgs, _ in loader:
             imgs = imgs.to(device)
             outputs = model(imgs)
-            # Flatten and collect results
             predictions.extend(outputs.cpu().numpy().flatten())
 
     return None
