@@ -97,7 +97,7 @@ def initialise(params: InitParameters) -> None:
     engine = setup_postgres_connection()
     with Session(engine) as session:
         grid_squares = session.exec(select(GridSquare).where(GridSquare.grid_uuid == params.grid_uuid)).all()
-    if not all(gs.gridsquare_img for gs in grid_squares):
+    if not all(gs.image_path for gs in grid_squares):
         return None
     square_imgs = {i: Path(gs.image_path) for i, gs in enumerate(grid_squares)}
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

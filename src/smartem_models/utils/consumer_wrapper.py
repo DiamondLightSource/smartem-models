@@ -1,5 +1,5 @@
 import json
-from abc.collections import Callable
+from collections.abc import Callable
 
 from pika.channel import Channel
 from pika.frame import Body, Method
