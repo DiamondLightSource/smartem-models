@@ -24,7 +24,11 @@ readme = "README.md"
 requires-python = ">=3.12"
 
 
-[project.scripts]
+[project.entry-points."smartem_models.train"]
+"vae-square" = "smartem_models.clustering.service:initialise"
+
+[project.entry-points."smartem_models.train.signature"]
+"vae-square" = "smartem_models.clustering.service:InitParameters"
 
 [project.urls]
 GitHub = "https://github.com/DiamondLightSource/smartem-decisions"

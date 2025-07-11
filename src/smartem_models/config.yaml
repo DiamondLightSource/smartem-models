@@ -1,0 +1,10 @@
+registered_models:
+  - vae-square
+
+processing_queues:
+  vae-square: 
+    train: vae_square_train
+
+distributed:
+  train: 
+    vae-square: true
