@@ -6,7 +6,7 @@ import numpy as np
 import tifffile
 from PIL import Image
 from pydantic import BaseModel
-from smartem_decisions.model.datbase import Atlas, AtlasTile, AtlasTileGridSquarePosition, GridSquare
+from smartem_decisions.model.database import Atlas, AtlasTile, AtlasTileGridSquarePosition, GridSquare
 from smartem_decisions.utils import setup_postgres_connection
 from sqlmodel import Session, select
 
