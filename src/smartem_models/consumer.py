@@ -6,8 +6,10 @@ from pika.channel import Channel
 from pika.frame import Body, Method
 from pika.spec import BasicProperties
 from pydantic import BaseModel
+from smartem_decisions.model.database import GridSquare
 from smartem_decisions.model.mq_event import MessageQueueEventType
-from smartem_decisions.utils import setup_rabbitmq
+from smartem_decisions.utils import setup_postgres_connection, setup_rabbitmq
+from sqlmodel import Session, select
 
 from smartem_models.utils import get_config
 
@@ -26,12 +28,28 @@ def publish_request(
     pub.publish_event(message_type, message_body)
 
 
+def _gridsquare_create_count(message: dict) -> int:
+    engine = setup_postgres_connection()
+    with Session(engine) as session:
+        num_gridsquares = session.exec(
+            select(GridSquare)
+            .where(GridSquare.grid_uuid == message["grid_uuid"])
+            .where(GridSquare.image_path.is_not(None))
+            .count()
+        )
+    return num_gridsquares
+
+
 def on_message(channel: Channel, method: Method, properties: BasicProperties, body: Body):
     message = json.loads(body.decode())
     if "event_type" not in message:
         logger.warning(f"Message missing 'event_type' field: {message}")
         channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
         return
+
+    count_functions = {
+        "gridsquare_create": _gridsquare_create_count,
+    }
 
     event_type = message["event_type"]
     config = get_config()
@@ -43,11 +61,19 @@ def on_message(channel: Channel, method: Method, properties: BasicProperties, bo
                 e for e in entry_points().select(group=f"smartem_models.{event_type}") if e.name in registered_models
             ]
             for hook in training_hooks:
-                ParameterModel = entry_points().select(group=f"smartem_models.{event_type}", name=hook.name)[0].load()
+                ParameterModel = (
+                    entry_points().select(group=f"smartem_models.{event_type}.signature", name=hook.name)[0].load()
+                )
                 params = ParameterModel(
-                    **message, **config.get("model_parameters", {}).get(hook.name, {}).get(event_type, {})
+                    **message, **config.get("model_parameters", {}).get(hook.name, {}).get(event_type, "")
                 )
                 if config.get("distributed", {}).get(event_type, {}).get(hook.name):
+                    requested_counts: list[int] | None
+                    if (
+                        requested_counts := config.get("act_on_count", {}).get(event_type, {}).get(hook.name)
+                    ) is not None:
+                        if count_functions[event_type](message) not in requested_counts:
+                            break
                     try:
                         publish_request(
                             config.get("processing_queues", {}).get(hook.name, {}).get(event_type, ""),

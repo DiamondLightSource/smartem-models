@@ -3,8 +3,13 @@ registered_models:
 
 processing_queues:
   vae-square: 
-    train: vae_square_train
+    atlas_create: vae_square_train
 
 distributed:
-  train: 
-    vae-square: true
+  vae-square: 
+    atlas_create: true
+
+model_parameters:
+  vae-square:
+    atlas_create:
+      num_epochs: 500
