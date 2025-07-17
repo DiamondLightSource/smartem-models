@@ -33,6 +33,7 @@ def infer(params: InferenceParameters) -> None:
         gamma=0.999,
     )
     model.load_state_dict(torch.load(params.model_path, map_location=torch.device("cpu")))
+    model.eval()
 
     engine = setup_postgres_connection()
     with Session(engine) as session:
@@ -114,14 +115,15 @@ def infer(params: InferenceParameters) -> None:
             confidence = y_pred.max(1)[0].detach().cpu().numpy()
             _, predicted = torch.max(y_pred.data, 1)
             predicted = predicted.detach().cpu().numpy()
-            score += (predicted * confidence)[0]
+            predicted = 2.0 * predicted - 1
+            score += 0.5 * ((predicted * confidence)[0] + 1)
             total_size_x += template.size[0]
             total_size_y += template.size[1]
 
         score /= len(pos)
-        scores[s] = score * np.sqrt(total_size_x * total_size_y) * (1 if _boundary_check(s) else 0.5)
+        scores[s] = score * np.sqrt(total_size_x * total_size_y) * (1 if _boundary_check(s) else 0)
 
-    max_score = np.max(scores.values())
+    max_score = np.max(list(scores.values()))
     scores = {k: v / max_score for k, v in scores.items()}
 
     return None
