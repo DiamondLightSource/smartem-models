@@ -96,7 +96,7 @@ def infer(params: InferenceParameters) -> None:
         total_size_y = 0
         images = [p.image for p in pos]
         if _area(pos) < size_threshold:
-            scores[s] = 1
+            scores[s] = 0
             continue
         for template in images:
             inputs = np.array(template)
@@ -114,12 +114,14 @@ def infer(params: InferenceParameters) -> None:
             confidence = y_pred.max(1)[0].detach().cpu().numpy()
             _, predicted = torch.max(y_pred.data, 1)
             predicted = predicted.detach().cpu().numpy()
-            predicted = -2.0 * predicted + 1.0
             score += (predicted * confidence)[0]
             total_size_x += template.size[0]
             total_size_y += template.size[1]
 
         score /= len(pos)
-        scores[s] = (score * np.sqrt(total_size_x * total_size_y) * (1 if _boundary_check(s) else 0.5),)
+        scores[s] = score * np.sqrt(total_size_x * total_size_y) * (1 if _boundary_check(s) else 0.5)
+
+    max_score = np.max(scores.values())
+    scores = {k: v / max_score for k, v in scores.items()}
 
     return None
