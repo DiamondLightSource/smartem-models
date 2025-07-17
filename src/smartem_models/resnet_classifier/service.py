@@ -95,7 +95,7 @@ def infer(params: InferenceParameters) -> None:
         total_size_x = 0
         total_size_y = 0
         images = [p.image for p in pos]
-        if _area(images) < size_threshold:
+        if _area(pos) < size_threshold:
             scores[s] = 1
             continue
         for template in images:
