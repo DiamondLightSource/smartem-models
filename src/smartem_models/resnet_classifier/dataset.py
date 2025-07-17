@@ -64,15 +64,15 @@ def grid_square_positions(grid_uuid: str, atlas_dir: str) -> dict[str, list[Grid
         if gs_imgs.get(pos[3].uuid) is None:
             gs_imgs[pos[3].uuid] = [
                 GridSquarePosition(
-                    images=_get_tile_image(pos[1].base_filename, pos[1].file_format, atlas_dir).crop(d),
-                    centers=(pos[3].center_x, pos[3].center_y),
+                    image=_get_tile_image(pos[1].base_filename, pos[1].file_format, atlas_dir).crop(d),
+                    center=(pos[3].center_x, pos[3].center_y),
                 )
             ]
         else:
             gs_imgs[pos[3].uuid].append(
                 GridSquarePosition(
-                    images=_get_tile_image(pos[1].base_filename, pos[1].file_format, atlas_dir).crop(d),
-                    centers=(pos[3].center_x, pos[3].center_y),
+                    image=_get_tile_image(pos[1].base_filename, pos[1].file_format, atlas_dir).crop(d),
+                    center=(pos[3].center_x, pos[3].center_y),
                 )
             )
 
