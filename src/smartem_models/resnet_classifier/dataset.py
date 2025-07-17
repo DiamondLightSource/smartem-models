@@ -5,16 +5,16 @@ import mrcfile
 import numpy as np
 import tifffile
 from PIL import Image
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from smartem_decisions.model.database import Atlas, AtlasTile, AtlasTileGridSquarePosition, GridSquare
 from smartem_decisions.utils import setup_postgres_connection
 from sqlmodel import Session, select
 
 
 @lru_cache(maxsize=50)
-def _get_tile_image(tile: AtlasTile, atlas_dir: Path) -> Image.Image:
-    tile_file_name = f"{tile.base_filename}.{tile.file_format.lower()}"
-    tile_file = atlas_dir / tile_file_name
+def _get_tile_image(base_filename: str, file_format: str, atlas_dir: str) -> Image.Image:
+    tile_file_name = f"{base_filename}.{file_format.lower()}"
+    tile_file = Path(atlas_dir) / tile_file_name
     if tile_file.suffix == ".mrc":
         data = mrcfile.read(tile_file)
     else:
@@ -38,8 +38,10 @@ class GridSquarePosition(BaseModel):
     image: Image.Image
     center_on_atlas: tuple[int, int]
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-def grid_square_positions(grid_uuid: str, atlas_dir: Path) -> dict[str, list[GridSquarePosition]]:
+
+def grid_square_positions(grid_uuid: str, atlas_dir: str) -> dict[str, list[GridSquarePosition]]:
     engine = setup_postgres_connection()
     with Session(engine) as session:
         positions = session.exec(
@@ -62,13 +64,15 @@ def grid_square_positions(grid_uuid: str, atlas_dir: Path) -> dict[str, list[Gri
         if gs_imgs.get(pos[3].uuid) is None:
             gs_imgs[pos[3].uuid] = [
                 GridSquarePosition(
-                    images=_get_tile_image(pos[1], atlas_dir).crop(d), centers=(pos[3].center_x, pos[3].center_y)
+                    images=_get_tile_image(pos[1].base_filename, pos[1].file_format, atlas_dir).crop(d),
+                    centers=(pos[3].center_x, pos[3].center_y),
                 )
             ]
         else:
             gs_imgs[pos[3].uuid].append(
                 GridSquarePosition(
-                    images=_get_tile_image(pos[1], atlas_dir).crop(d), centers=(pos[3].center_x, pos[3].center_y)
+                    images=_get_tile_image(pos[1].base_filename, pos[1].file_format, atlas_dir).crop(d),
+                    centers=(pos[3].center_x, pos[3].center_y),
                 )
             )
 

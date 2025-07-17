@@ -37,7 +37,7 @@ def infer(params: InferenceParameters) -> None:
     engine = setup_postgres_connection()
     with Session(engine) as session:
         grid = session.exec(select(Grid).where(Grid.uuid == params.grid_uuid)).one()
-    gs_positions = grid_square_positions(params.grid_uuid, Path(grid.atlas_dir).parent)
+    gs_positions = grid_square_positions(params.grid_uuid, str(Path(grid.atlas_dir).parent))
 
     boundaries = (
         (
