@@ -30,7 +30,7 @@ class UpdateParameters(BaseModel):
     gridsquare_id: int | None = None
     foilhole_id: int | None = None
 
-    @model_validator(model="after")
+    @model_validator(mode="after")
     def id_present_check(self):
         if sum((self.gridsquare_id is None, self.foilhole_id is None)) != 1:
             raise ValueError("Either gridsquare_id or foilhole_id must be provided but not both")
