@@ -55,44 +55,38 @@ def on_message(channel: Channel, method: Method, properties: BasicProperties, bo
     config = get_config()
     registered_models = config.get("registered_models", [])
 
-    for event in MessageQueueEventType:
-        if event_type == event.value:
-            training_hooks = [
-                e for e in entry_points().select(group=f"smartem_models.{event_type}") if e.name in registered_models
-            ]
-            for hook in training_hooks:
-                ParameterModel = (
-                    entry_points().select(group=f"smartem_models.{event_type}.signature", name=hook.name)[0].load()
-                )
-                params = ParameterModel(
-                    **message, **config.get("model_parameters", {}).get(hook.name, {}).get(event_type, "")
-                )
-                if config.get("distributed", {}).get(event_type, {}).get(hook.name):
-                    requested_counts: list[int] | None
-                    if (
-                        requested_counts := config.get("act_on_count", {}).get(event_type, {}).get(hook.name)
-                    ) is not None:
-                        if count_functions[event_type](message) not in requested_counts:
-                            break
-                    try:
-                        publish_request(
-                            config.get("processing_queues", {}).get(hook.name, {}).get(event_type, ""),
-                            event,
-                            params,
-                        )
-                    except ValueError:
-                        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-                else:
-                    hook.load()(params)
-            break
-
-    else:
+    try:
+        event = MessageQueueEventType(event_type)
+    except ValueError:
         logger.warning(f"Event type {event_type} not recognised", exc_info=True)
         channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+        return
+    training_hooks = [
+        e for e in entry_points().select(group=f"smartem_models.{event_type}") if e.name in registered_models
+    ]
+    for hook in training_hooks:
+        ParameterModel = entry_points().select(group=f"smartem_models.{event_type}.signature", name=hook.name)[0].load()
+        params = ParameterModel(**message, **config.get("model_parameters", {}).get(hook.name, {}).get(event_type, ""))
+        if config.get("distributed", {}).get(event_type, {}).get(hook.name):
+            requested_counts: list[int] | None
+            if (requested_counts := config.get("act_on_count", {}).get(event_type, {}).get(hook.name)) is not None:
+                if count_functions[event_type](message) not in requested_counts:
+                    break
+            try:
+                publish_request(
+                    config.get("processing_queues", {}).get(hook.name, {}).get(event_type, ""),
+                    event,
+                    params,
+                )
+            except ValueError:
+                channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+                return
+        else:
+            hook.load()(params)
 
     channel.basic_ack(delivery_tag=method.delivery_tag)
 
 
 def run():
-    pub, con = setup_rabbitmq(queue_name="smartem_decisions")
+    pub, con = setup_rabbitmq(queue_name="smartem_models")
     con.consume(on_message, prefetch_count=1)
