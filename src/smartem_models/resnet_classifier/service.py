@@ -4,12 +4,15 @@ import numpy as np
 import torch
 from pydantic import BaseModel
 from smartem_decisions.model.database import Grid
+from smartem_decisions.mq_publisher import publish_gridsquare_model_prediction
 from smartem_decisions.utils import setup_postgres_connection
 from sqlmodel import Session, select
 from torchvision import models, transforms
 
 from smartem_models.resnet_classifier.dataset import GridSquarePosition, grid_square_positions
 from smartem_models.resnet_classifier.model import Net
+
+model_name = "resnet-atlas"
 
 
 class InferenceParameters(BaseModel):
@@ -124,6 +127,8 @@ def infer(params: InferenceParameters) -> None:
         scores[s] = score * np.sqrt(total_size_x * total_size_y) * (1 if _boundary_check(s) else 0)
 
     max_score = np.max(list(scores.values()))
-    scores = {k: v / max_score for k, v in scores.items()}
+
+    for k, v in scores.items():
+        publish_gridsquare_model_prediction(gridsquare_uuid=k, model_name=model_name, prediciton_value=v / max_score)
 
     return None
