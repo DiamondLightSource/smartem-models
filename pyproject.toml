@@ -27,6 +27,7 @@ requires-python = ">=3.12"
 
 [project.scripts]
 "smartem_models.service" = "smartem_models.cli.service:run"
+"smartem_models.consumer" = "smartem_models.consumer:run"
 
 [project.entry-points."smartem_models.grid.registered"]
 "resnet-atlas" = "smartem_models.resnet_classifier.service:infer"
