@@ -48,7 +48,7 @@ def on_message(channel: Channel, method: Method, properties: BasicProperties, bo
         return
 
     count_functions = {
-        "gridsquare_create": _gridsquare_create_count,
+        "gridsquare.create": _gridsquare_create_count,
     }
 
     event_type = message["event_type"]
