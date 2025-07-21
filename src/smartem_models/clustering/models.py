@@ -209,26 +209,26 @@ class EIAE(nn.Module):
         self.r2_act = gspaces.rot2dOnR2(N=n_rot)
 
         self.hidden_dims = hidden_dims
-        self.c, self.m, self.n = input_dims  # self.input_dim
+        self.c, self.m, self.n = input_dims
         self.reduced_dim_m = int(np.ceil(self.m / (2 ** (len(self.hidden_dims) - 1))))
         self.reduced_dim_n = int(np.ceil(self.n / (2 ** (len(self.hidden_dims) - 1))))
         self.fc_hidden = 128
         self.latent_dim = lat_dim
         self.alpha = alpha
 
-        self.share1 = Equi_layer(self.r2_act, self.hidden_dims[0], self.hidden_dims[1], 64, 7, 3, True)
+        self.share1 = Equi_layer(self.r2_act, self.hidden_dims[0], self.hidden_dims[1], self.m, 7, 3, True)
 
         self.pool1 = nn.MaxPool2d(2)
 
-        self.share2 = Equi_layer(self.r2_act, self.hidden_dims[1], self.hidden_dims[2], 32, 3, 1, True)
+        self.share2 = Equi_layer(self.r2_act, self.hidden_dims[1], self.hidden_dims[2], self.m // 2, 3, 1, True)
 
         self.pool2 = nn.MaxPool2d(2)
 
-        self.share3 = Equi_layer(self.r2_act, self.hidden_dims[2], self.hidden_dims[3], 16, 3, 1, True)
+        self.share3 = Equi_layer(self.r2_act, self.hidden_dims[2], self.hidden_dims[3], self.m // 4, 3, 1, True)
 
         self.pool3 = nn.MaxPool2d(2)
 
-        self.share4 = Equi_layer(self.r2_act, self.hidden_dims[3], self.hidden_dims[4], 8, 3, 1, False)
+        self.share4 = Equi_layer(self.r2_act, self.hidden_dims[3], self.hidden_dims[4], self.m // 8, 3, 1, False)
 
         out_type = self.share4.out_type
         self.pool4 = enn.SequentialModule(enn.PointwiseAvgPoolAntialiased(out_type, sigma=0.66, stride=2))
