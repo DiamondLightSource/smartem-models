@@ -1,52 +1,43 @@
 import json
 from logging import getLogger
-from pathlib import Path
 
 from backports.entry_points_selectable import entry_points
 from pika.channel import Channel
 from pika.frame import Body, Method
 from pika.spec import BasicProperties
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel
+from smartem_decisions.model.database import GridSquare
 from smartem_decisions.model.mq_event import MessageQueueEventType
-from smartem_decisions.utils import setup_rabbitmq
+from smartem_decisions.utils import setup_postgres_connection, setup_rabbitmq
+from sqlmodel import Session, select
 
 from smartem_models.utils import get_config
 
 logger = getLogger("smartem_models.consumer")
 
 
-class TrainingParameters(BaseModel):
-    grid_id: int
-
-
-class InferenceParameters(BaseModel):
-    img_path: Path
-    magnification_scale: str
-    model_weights_path: Path | None = None
-
-
-class UpdateParameters(BaseModel):
-    quality: bool
-    gridsquare_id: int | None = None
-    foilhole_id: int | None = None
-
-    @model_validator(mode="after")
-    def id_present_check(self):
-        if sum((self.gridsquare_id is None, self.foilhole_id is None)) != 1:
-            raise ValueError("Either gridsquare_id or foilhole_id must be provided but not both")
-        return self
-
-
 def publish_request(
     queue_name: str,
     message_type: MessageQueueEventType,
-    message_body: TrainingParameters | InferenceParameters | UpdateParameters,
+    message_body: BaseModel,
 ):
     if not queue_name:
         logger.error("No queue name was provided to processing request publish", exc_info=True)
         raise ValueError("No queue name provided")
     pub, con = setup_rabbitmq(queue_name=queue_name)
     pub.publish_event(message_type, message_body)
+
+
+def _gridsquare_create_count(message: dict) -> int:
+    engine = setup_postgres_connection()
+    with Session(engine) as session:
+        num_gridsquares = session.exec(
+            select(GridSquare)
+            .where(GridSquare.grid_uuid == message["grid_uuid"])
+            .where(GridSquare.image_path.is_not(None))
+            .count()
+        )
+    return num_gridsquares
 
 
 def on_message(channel: Channel, method: Method, properties: BasicProperties, body: Body):
@@ -56,75 +47,46 @@ def on_message(channel: Channel, method: Method, properties: BasicProperties, bo
         channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
         return
 
+    count_functions = {
+        "gridsquare.create": _gridsquare_create_count,
+    }
+
     event_type = message["event_type"]
     config = get_config()
     registered_models = config.get("registered_models", [])
 
-    match event_type:
-        case "train_model":
-            training_hooks = [
-                e for e in entry_points().select(group="smartem_models.train") if e.name in registered_models
-            ]
-            for hook in training_hooks:
-                params = TrainingParameters(grid_id=message["grid_id"])
-                if config.get("distributed", {}).get("train", {}).get(hook.name):
-                    try:
-                        publish_request(
-                            config.get("processing_queues", {}).get(hook.name, {}).get("train", ""),
-                            MessageQueueEventType.TRAIN,
-                            params,
-                        )
-                    except ValueError:
-                        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-                else:
-                    hook.load()(params)
-        case "infer":
-            inference_hooks = [
-                e for e in entry_points().select(group="smartem_models.infer") if e.name in registered_models
-            ]
-            for hook in inference_hooks:
-                params = InferenceParameters(
-                    img_path=message["img_path"],
-                    magnification_scale=message["magnification_scale"],
-                    model_weights_path=message.get("model_weights_path"),
+    try:
+        event = MessageQueueEventType(event_type)
+    except ValueError:
+        logger.warning(f"Event type {event_type} not recognised", exc_info=True)
+        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+        return
+    training_hooks = [
+        e for e in entry_points().select(group=f"smartem_models.{event_type}") if e.name in registered_models
+    ]
+    for hook in training_hooks:
+        ParameterModel = entry_points().select(group=f"smartem_models.{event_type}.signature", name=hook.name)[0].load()
+        params = ParameterModel(**message, **config.get("model_parameters", {}).get(hook.name, {}).get(event_type, ""))
+        if config.get("distributed", {}).get(event_type, {}).get(hook.name):
+            requested_counts: list[int] | None
+            if (requested_counts := config.get("act_on_count", {}).get(event_type, {}).get(hook.name)) is not None:
+                if count_functions[event_type](message) not in requested_counts:
+                    break
+            try:
+                publish_request(
+                    config.get("processing_queues", {}).get(hook.name, {}).get(event_type, ""),
+                    event,
+                    params,
                 )
-                if config.get("distributed").get("infer", {}).get(hook.name):
-                    try:
-                        publish_request(
-                            config.get("processing_queues", {}).get(hook.name, {}).get("infer", ""),
-                            MessageQueueEventType.INFER,
-                            params,
-                        )
-                    except ValueError:
-                        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-                else:
-                    hook.load()(params)
-        case "update":
-            update_hooks = [e for e in entry_points().select("smartem_models.update") if e.name in registered_models]
-            for hook in update_hooks:
-                params = UpdateParameters(
-                    quality=message["quality"],
-                    gridsquare_id=message.get("gridsquare_id"),
-                    foilhole_id=message.get("foilhole_id"),
-                )
-                if config.get("distributed").get("update", {}).get(hook.name):
-                    try:
-                        publish_request(
-                            config.get("processing_queues", {}).get(hook.name, {}).get("update", ""),
-                            MessageQueueEventType.MODEL_UPDATE,
-                            params,
-                        )
-                    except ValueError:
-                        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-                else:
-                    hook.load()(params)
-        case _:
-            logger.warning(f"Event type {event_type} not recognised", exc_info=True)
-            channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+            except ValueError:
+                channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+                return
+        else:
+            hook.load()(params)
 
     channel.basic_ack(delivery_tag=method.delivery_tag)
 
 
 def run():
-    pub, con = setup_rabbitmq(queue_name="smartem_decisions")
+    pub, con = setup_rabbitmq(queue_name="smartem_models")
     con.consume(on_message, prefetch_count=1)

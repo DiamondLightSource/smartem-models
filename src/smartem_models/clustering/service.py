@@ -5,7 +5,8 @@ import numpy as np
 import torch
 from pydantic import BaseModel
 from sklearn.cluster import KMeans
-from smartem_decisions.model.database import GridSquare, QualityPrediction, QualityPredictionModelParameter
+from smartem_decisions.model.database import GridSquare, QualityPredictionModelParameter
+from smartem_decisions.mq_publisher import publish_gridsquare_model_prediction, publish_model_parameter_update
 from smartem_decisions.utils import setup_postgres_connection
 from sqlmodel import Session, and_, func, select
 from torch.autograd import Variable
@@ -26,56 +27,37 @@ def _set_model_parameters(
     coords: list[tuple[str, tuple[float, float], int]],
     grid_uuid: str,
 ) -> None:
-    model_parameters = []
     for i, d in enumerate(dists):
-        model_parameters.extend(
-            [
-                QualityPredictionModelParameter(
-                    grid_uuid=grid_uuid,
-                    prediction_model_name=model_name,
-                    key=str(j),
-                    group=f"dist:{i}",
-                    value=float(d[j]),
-                )
-                for j in range(len(d))
-            ]
-        )
-    coord_parameters = []
-    cluster_parameters = []
+        for j in range(len(d)):
+            publish_model_parameter_update(
+                grid_uuid=grid_uuid,
+                model_name=model_name,
+                key=str(j),
+                value=float(d[j]),
+                group=f"dist:{i}",
+            )
     for c in coords:
-        coord_parameters.append(
-            QualityPredictionModelParameter(
-                grid_uuid=grid_uuid,
-                prediction_model_name=model_name,
-                key="x",
-                group=f"coordinates:{c[0]}",
-                value=float(c[1][0]),
-            )
+        publish_model_parameter_update(
+            grid_uuid=grid_uuid,
+            model_name=model_name,
+            key="x",
+            value=float(c[1][0]),
+            group=f"coordinates:{c[0]}",
         )
-        coord_parameters.append(
-            QualityPredictionModelParameter(
-                grid_uuid=grid_uuid,
-                prediction_model_name=model_name,
-                key="y",
-                group=f"coordinates:{c[0]}",
-                value=float(c[1][1]),
-            )
+        publish_model_parameter_update(
+            grid_uuid=grid_uuid,
+            model_name=model_name,
+            key="y",
+            value=float(c[1][1]),
+            group=f"coordinates:{c[0]}",
         )
-        cluster_parameters.append(
-            QualityPredictionModelParameter(
-                grid_uuid=grid_uuid,
-                prediction_model_name=model_name,
-                key=str(c[0]),
-                group="cluster_indices",
-                value=float(c[2]),
-            )
+        publish_model_parameter_update(
+            grid_uuid=grid_uuid,
+            model_name=model_name,
+            key=str(c[0]),
+            value=float(c[2]),
+            group="cluster_indices",
         )
-    engine = setup_postgres_connection()
-    with Session(engine) as session:
-        session.add_all(model_parameters)
-        session.add_all(coord_parameters)
-        session.add_all(cluster_parameters)
-        session.commit()
     return None
 
 
@@ -159,34 +141,27 @@ def initialise(params: InitParameters) -> None:
 
 
 def _add_cluster_index(grid_uuid: str, cluster_index: int, gridsquare: str, coords: np.array) -> None:
-    coords_parameters = [
-        QualityPredictionModelParameter(
-            grid_uuid=grid_uuid,
-            prediction_model_name=model_name,
-            key="x",
-            group=f"coordinates:{gridsquare}",
-            value=coords[0],
-        ),
-        QualityPredictionModelParameter(
-            grid_uuid=grid_uuid,
-            prediction_model_name=model_name,
-            key="y",
-            group=f"coordinates:{gridsquare}",
-            value=coords[1],
-        ),
-    ]
-    cluster_parameter = QualityPredictionModelParameter(
+    publish_model_parameter_update(
         grid_uuid=grid_uuid,
-        prediction_model_name=model_name,
-        key=gridsquare,
-        group="cluster_indices",
-        value=cluster_index,
+        model_name=model_name,
+        key="x",
+        value=coords[0],
+        group=f"coordinates:{gridsquare}",
     )
-    engine = setup_postgres_connection()
-    with Session(engine) as session:
-        session.add_all(coords_parameters)
-        session.add(cluster_parameter)
-        session.commit()
+    publish_model_parameter_update(
+        grid_uuid=grid_uuid,
+        model_name=model_name,
+        key="y",
+        value=coords[1],
+        group=f"coordinates:{gridsquare}",
+    )
+    publish_model_parameter_update(
+        grid_uuid=grid_uuid,
+        model_name=model_name,
+        key=gridsquare,
+        value=cluster_index,
+        group="cluster_indices",
+    )
     return None
 
 
@@ -269,29 +244,23 @@ def _get_dist(grid_uuid: str, cluster_index: int, num_steps: int = 10) -> np.arr
 def _record_dist(dist: np.array, grid_uuid: str, cluster_index: int) -> None:
     if np.sum(dist) == 0:
         return None
-    model_parameters = [
-        QualityPredictionModelParameter(
+    for j in range(len(dist)):
+        publish_model_parameter_update(
             grid_uuid=grid_uuid,
-            prediction_model_name=model_name,
+            model_name=model_name,
             key=str(j),
             group=f"dist:{cluster_index}",
             value=dist[j],
         )
-        for j in range(len(dist))
-    ]
-    engine = setup_postgres_connection()
-    with Session(engine) as session:
-        session.add_all(model_parameters)
-        session.commit()
     return None
 
 
 def _record_score(score: float, gridsquare_uuid: str) -> None:
-    prediction = QualityPrediction(gridsquare_uuid=gridsquare_uuid, prediction_model_name=model_name, value=score)
-    engine = setup_postgres_connection()
-    with Session(engine) as session:
-        session.add(prediction)
-        session.commit()
+    publish_gridsquare_model_prediction(
+        gridsquare_uuid=gridsquare_uuid,
+        model_name=model_name,
+        prediction_value=score,
+    )
     return None
 
 

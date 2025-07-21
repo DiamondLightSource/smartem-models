@@ -27,12 +27,13 @@ requires-python = ">=3.12"
 
 [project.scripts]
 "smartem_models.service" = "smartem_models.cli.service:run"
+"smartem_models.consumer" = "smartem_models.consumer:run"
 
-[project.entry-points."smartem_models.train"]
-"vae-square" = "smartem_models.clustering.service:initialise"
+[project.entry-points."smartem_models.grid.registered"]
+"resnet-atlas" = "smartem_models.resnet_classifier.service:infer"
 
-[project.entry-points."smartem_models.train.signature"]
-"vae-square" = "smartem_models.clustering.service:InitParameters"
+[project.entry-points."smartem_models.grid.registered.signature"]
+"resnet-atlas" = "smartem_models.resnet_classifier.service:InferenceParameters"
 
 [project.urls]
 GitHub = "https://github.com/DiamondLightSource/smartem-decisions"

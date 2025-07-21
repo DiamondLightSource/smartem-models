@@ -1,10 +1,15 @@
 registered_models:
-  - vae-square
+  - resnet-atlas
 
 processing_queues:
-  vae-square: 
-    train: vae_square_train
+  resnet-atlas: 
+    grid.registered: resnet_atlas_infer
 
 distributed:
-  train: 
-    vae-square: true
+  resnet-atlas: 
+    grid.registered: false
+
+model_parameters:
+  resnet-atlas:
+    grid.registered:
+      model_path: "/path/to/weights"
