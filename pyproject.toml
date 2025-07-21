@@ -25,15 +25,29 @@ license.file = "LICENSE"
 readme = "README.md"
 requires-python = ">=3.12"
 
+[project.optional-dependencies]
+torch-gpu = [
+    "escnn==1.0.11",
+    "scikit-learn",
+    "torch==2.7.2",
+]
+torch-cpu = [
+    "escnn==1.0.11",
+    "scikit-learn",
+    "torch==2.7.1+cpu",
+]
+
 [project.scripts]
 "smartem_models.service" = "smartem_models.cli.service:run"
 "smartem_models.consumer" = "smartem_models.consumer:run"
 
 [project.entry-points."smartem_models.grid.registered"]
 "resnet-atlas" = "smartem_models.resnet_classifier.service:infer"
+"vae-atlas" = "smartem_models.clustering.service_atlas:initialise"
 
 [project.entry-points."smartem_models.grid.registered.signature"]
 "resnet-atlas" = "smartem_models.resnet_classifier.service:InferenceParameters"
+"vae-atlas" ="smartem_models.clustering.service_atlas:InitParameters"
 
 [project.urls]
 GitHub = "https://github.com/DiamondLightSource/smartem-decisions"
