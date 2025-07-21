@@ -18,7 +18,7 @@ from smartem_models.clustering.models import EIAE
 from smartem_models.clustering.service import _set_model_parameters
 from smartem_models.utils.parameter_updating_cluster import init_distributions
 
-model_name = "vae-atlas"
+model_name = "dae-atlas"
 
 
 class InitParameters(BaseModel):

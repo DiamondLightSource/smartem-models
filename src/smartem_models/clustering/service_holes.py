@@ -19,7 +19,7 @@ from smartem_models.clustering.service import _add_cluster_index, _record_dist, 
 from smartem_models.utils import read_img
 from smartem_models.utils.parameter_updating_cluster import init_distributions, score, update_distribution
 
-model_name = "vae-hole"
+model_name = "dae-hole"
 
 
 class InitParameters(BaseModel):

@@ -43,11 +43,11 @@ torch-cpu = [
 
 [project.entry-points."smartem_models.grid.registered"]
 "resnet-atlas" = "smartem_models.resnet_classifier.service:infer"
-"vae-atlas" = "smartem_models.clustering.service_atlas:initialise"
+"dae-atlas" = "smartem_models.clustering.service_atlas:initialise"
 
 [project.entry-points."smartem_models.grid.registered.signature"]
 "resnet-atlas" = "smartem_models.resnet_classifier.service:InferenceParameters"
-"vae-atlas" ="smartem_models.clustering.service_atlas:InitParameters"
+"dae-atlas" ="smartem_models.clustering.service_atlas:InitParameters"
 
 [project.urls]
 GitHub = "https://github.com/DiamondLightSource/smartem-decisions"

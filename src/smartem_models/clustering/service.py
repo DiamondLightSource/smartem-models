@@ -19,7 +19,7 @@ from smartem_models.clustering.models import EIAE
 from smartem_models.utils import read_img
 from smartem_models.utils.parameter_updating_cluster import init_distributions, score, update_distribution
 
-model_name = "vae-square"
+model_name = "dae-square"
 
 
 def _set_model_parameters(

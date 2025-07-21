@@ -1,23 +1,23 @@
 registered_models:
   - resnet-atlas
-  - vae-atlas
+  - dae-atlas
 
 processing_queues:
   resnet-atlas: 
     grid.registered: resnet_atlas_infer
-  vae-atlas:
-    grid.registered: vae_atlas_init
+  dae-atlas:
+    grid.registered: dae_atlas_init
 
 distributed:
   resnet-atlas: 
     grid.registered: false
-  vae-atlas:
+  dae-atlas:
     grid.registered: true
 
 model_parameters:
   resnet-atlas:
     grid.registered:
       model_path: "/path/to/weights"
-  vae-atlas:
+  dae-atlas:
     grid.registered:
       model_path: "/path/to/starting/weights"
