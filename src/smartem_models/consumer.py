@@ -6,9 +6,9 @@ from pika.channel import Channel
 from pika.frame import Body, Method
 from pika.spec import BasicProperties
 from pydantic import BaseModel
-from smartem_decisions.model.database import GridSquare
-from smartem_decisions.model.mq_event import MessageQueueEventType
-from smartem_decisions.utils import setup_postgres_connection, setup_rabbitmq
+from smartem_backend.model.database import GridSquare
+from smartem_backend.model.mq_event import MessageQueueEventType
+from smartem_backend.utils import setup_postgres_connection, setup_rabbitmq
 from sqlmodel import Session, select
 
 from smartem_models.utils import get_config
