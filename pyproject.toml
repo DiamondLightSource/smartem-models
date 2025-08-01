@@ -28,7 +28,7 @@ requires-python = ">=3.12"
 torch-gpu = [
     "escnn==1.0.11",
     "scikit-learn",
-    "torch==2.7.2",
+    "torch==2.7.1",
     "torchvision",
 ]
 torch-cpu = [
