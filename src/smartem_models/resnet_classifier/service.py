@@ -3,9 +3,9 @@ from pathlib import Path
 import numpy as np
 import torch
 from pydantic import BaseModel
-from smartem_decisions.model.database import Grid
-from smartem_decisions.mq_publisher import publish_gridsquare_model_prediction
-from smartem_decisions.utils import setup_postgres_connection
+from smartem_backend.model.database import Grid
+from smartem_backend.mq_publisher import publish_gridsquare_model_prediction
+from smartem_backend.utils import setup_postgres_connection
 from sqlmodel import Session, select
 from torchvision import models, transforms
 

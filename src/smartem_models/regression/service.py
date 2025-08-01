@@ -2,8 +2,8 @@ from pathlib import Path
 
 import torch
 from pydantic import BaseModel
-from smartem_decisions.model.database import FoilHole, GridSquare
-from smartem_decisions.utils import setup_postgres_connection
+from smartem_backend.model.database import FoilHole, GridSquare
+from smartem_backend.utils import setup_postgres_connection
 from sqlmodel import Session, select
 from torch.utils.data import DataLoader
 from torchvision import transforms

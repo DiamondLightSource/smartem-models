@@ -5,7 +5,7 @@ from pika.channel import Channel
 from pika.frame import Body, Method
 from pika.spec import BasicProperties
 from pydantic import BaseModel
-from smartem_decisions.utils import setup_rabbitmq
+from smartem_backend.utils import setup_rabbitmq
 
 
 def consume(func: Callable, queue_name: str, message_format: type[BaseModel]):

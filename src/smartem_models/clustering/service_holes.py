@@ -5,8 +5,8 @@ import numpy as np
 import torch
 from pydantic import BaseModel
 from sklearn.cluster import KMeans
-from smartem_decisions.model.database import FoilHole, GridSquare, QualityPredictionModelParameter
-from smartem_decisions.utils import setup_postgres_connection
+from smartem_backend.model.database import FoilHole, GridSquare, QualityPredictionModelParameter
+from smartem_backend.utils import setup_postgres_connection
 from sqlmodel import Session, select
 from torch.autograd import Variable
 from torch.utils.data import DataLoader

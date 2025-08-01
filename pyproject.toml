@@ -50,7 +50,7 @@ torch-cpu = [
 "dae-atlas" ="smartem_models.clustering.service_atlas:InitParameters"
 
 [project.urls]
-GitHub = "https://github.com/DiamondLightSource/smartem-decisions"
+GitHub = "https://github.com/DiamondLightSource/smartem-models"
 
 [[project.authors]] # Further authors may be added by duplicating this section
 email = "daniel.hatton@diamond.ac.uk"
