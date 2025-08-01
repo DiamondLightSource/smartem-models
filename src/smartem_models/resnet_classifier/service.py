@@ -2,7 +2,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from pydantic import BaseModel
 from smartem_backend.model.database import Grid
 from smartem_backend.mq_publisher import publish_gridsquare_model_prediction
 from smartem_backend.utils import setup_postgres_connection
@@ -11,19 +10,14 @@ from torchvision import models, transforms
 
 from smartem_models.resnet_classifier.dataset import GridSquarePosition, grid_square_positions
 from smartem_models.resnet_classifier.model import Net
+from smartem_models.resnet_classifier.parameter_models import InferenceParameters
 
 model_name = "resnet-atlas"
 
 
-class InferenceParameters(BaseModel):
-    grid_uuid: str
-    model_path: Path
-    cpus: int = 4
-
-
 def infer(params: InferenceParameters) -> None:
     torch.set_num_threads(params.cpus)
-    feature_extractor = models.resnet18(pretrained=True)
+    feature_extractor = models.resnet18(pretrained=False)
     feature_extractor.conv1 = torch.nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
     feature_extractor.maxpool = torch.nn.Identity()
     feature_extractor.fc = torch.nn.Identity()

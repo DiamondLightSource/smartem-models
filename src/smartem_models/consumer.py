@@ -67,7 +67,7 @@ def on_message(channel: Channel, method: Method, properties: BasicProperties, bo
     for hook in training_hooks:
         ParameterModel = entry_points().select(group=f"smartem_models.{event_type}.signature", name=hook.name)[0].load()
         params = ParameterModel(**message, **config.get("model_parameters", {}).get(hook.name, {}).get(event_type, ""))
-        if config.get("distributed", {}).get(event_type, {}).get(hook.name):
+        if config.get("distributed", {}).get(hook.name, {}).get(event_type):
             requested_counts: list[int] | None
             if (requested_counts := config.get("act_on_count", {}).get(event_type, {}).get(hook.name)) is not None:
                 if count_functions[event_type](message) not in requested_counts:
