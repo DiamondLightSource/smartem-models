@@ -44,10 +44,12 @@ torch-cpu = [
 
 [project.entry-points."smartem_models.grid.registered"]
 "resnet-atlas" = "smartem_models.resnet_classifier.service:infer"
+"resnet-holes" = "smartem_models.resnet_classifier.service_holes:infer"
 "dae-atlas" = "smartem_models.clustering.service_atlas:initialise"
 
 [project.entry-points."smartem_models.grid.registered.signature"]
 "resnet-atlas" = "smartem_models.resnet_classifier.parameter_models:InferenceParameters"
+"resnet-holes" = "smartem_models.resnet_classifier.parameter_models:HoleInferenceParameters"
 "dae-atlas" ="smartem_models.clustering.service_atlas:InitParameters"
 
 [project.urls]

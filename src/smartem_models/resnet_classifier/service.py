@@ -79,16 +79,17 @@ def infer(params: InferenceParameters) -> None:
     else:
         size_threshold = 0
 
+    img_transform = transforms.Compose(
+        [
+            transforms.ToPILImage(),
+            transforms.Resize((256, 256)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ]
+    )
+
     scores = {}
     for s, pos in gs_positions.items():
-        img_transform = transforms.Compose(
-            [
-                transforms.ToPILImage(),
-                transforms.Resize((256, 256)),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            ]
-        )
         score: float = 0
         total_size_x = 0
         total_size_y = 0

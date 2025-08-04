@@ -1,22 +1,30 @@
 registered_models:
   - resnet-atlas
+  - resnet-holes
   - dae-atlas
 
 processing_queues:
   resnet-atlas: 
     grid.registered: resnet_atlas_infer
+  resnet-holes:
+    gridsquare.created: resnet_holes_infer
   dae-atlas:
     grid.registered: dae_atlas_init
 
 distributed:
   resnet-atlas: 
     grid.registered: false
+  resnet-holes: 
+    gridsquare.created: false
   dae-atlas:
     grid.registered: true
 
 model_parameters:
   resnet-atlas:
     grid.registered:
+      model_path: "/path/to/weights"
+  resnet-holes:
+    gridsquare.created:
       model_path: "/path/to/weights"
   dae-atlas:
     grid.registered:

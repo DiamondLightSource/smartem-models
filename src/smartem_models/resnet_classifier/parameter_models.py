@@ -7,3 +7,10 @@ class InferenceParameters(BaseModel):
     grid_uuid: str
     model_path: Path
     cpus: int = 4
+
+
+class HoleInferenceParameters(BaseModel):
+    grid_uuid: str
+    gridsquare_uuid: str
+    model_path: Path
+    cpus: int = 4
