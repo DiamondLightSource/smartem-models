@@ -25,18 +25,19 @@ readme = "README.md"
 requires-python = ">=3.12"
 
 [project.optional-dependencies]
-torch-gpu = [
+torchgpu = [
     "escnn==1.0.11",
     "scikit-learn",
     "torch==2.7.1",
     "torchvision",
 ]
-torch-cpu = [
+torchcpu = [
     "escnn==1.0.11",
     "scikit-learn",
-    "torch==2.7.1+cpu",
+    "torch==2.7.1",
     "torchvision",
 ]
+
 
 [project.scripts]
 "smartem_models.service" = "smartem_models.cli.service:run"
@@ -76,6 +77,26 @@ name = "Jaehoon Cha"
 [[project.authors]] # Further authors may be added by duplicating this section
 email = "val.redchenko@diamond.ac.uk"
 name = "Val Redchenko"
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cpu", extra = "torchcpu" },
+  { index = "pytorch-cu128", extra = "torchgpu" },
+]
+torchvision = [
+  { index = "pytorch-cpu", extra = "torchcpu" },
+  { index = "pytorch-cu128", extra = "torchgpu" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
 
 [tool.setuptools]
 package-dir = {"" = "src"}
