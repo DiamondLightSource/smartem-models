@@ -8,6 +8,7 @@ processing_queues:
     grid.registered: resnet_atlas_infer
   resnet-holes:
     gridsquare.created: resnet_holes_infer
+    gridsquare.updated: resnet_holes_infer
   dae-atlas:
     grid.registered: dae_atlas_init
 
@@ -16,6 +17,7 @@ distributed:
     grid.registered: false
   resnet-holes: 
     gridsquare.created: false
+    gridsquare.updated: false
   dae-atlas:
     grid.registered: true
 
@@ -25,6 +27,8 @@ model_parameters:
       model_path: "/path/to/weights"
   resnet-holes:
     gridsquare.created:
+      model_path: "/path/to/weights"
+    gridsquare.updated:
       model_path: "/path/to/weights"
   dae-atlas:
     grid.registered:

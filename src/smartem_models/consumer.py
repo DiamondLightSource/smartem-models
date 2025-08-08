@@ -48,7 +48,7 @@ def on_message(channel: Channel, method: Method, properties: BasicProperties, bo
         return
 
     count_functions = {
-        "gridsquare.create": _gridsquare_create_count,
+        "gridsquare.created": _gridsquare_create_count,
     }
 
     event_type = message["event_type"]
@@ -69,7 +69,7 @@ def on_message(channel: Channel, method: Method, properties: BasicProperties, bo
         params = ParameterModel(**message, **config.get("model_parameters", {}).get(hook.name, {}).get(event_type, ""))
         if config.get("distributed", {}).get(hook.name, {}).get(event_type):
             requested_counts: list[int] | None
-            if (requested_counts := config.get("act_on_count", {}).get(event_type, {}).get(hook.name)) is not None:
+            if (requested_counts := config.get("act_on_count", {}).get(hook.name, {}).get(event_type)) is not None:
                 if count_functions[event_type](message) not in requested_counts:
                     break
             try:

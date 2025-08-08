@@ -44,13 +44,23 @@ torch-cpu = [
 
 [project.entry-points."smartem_models.grid.registered"]
 "resnet-atlas" = "smartem_models.resnet_classifier.service:infer"
-"resnet-holes" = "smartem_models.resnet_classifier.service_holes:infer"
 "dae-atlas" = "smartem_models.clustering.service_atlas:initialise"
+
+[project.entry-points."smartem_models.gridsquare.created"]
+"resnet-holes" = "smartem_models.resnet_classifier.service_holes:infer"
+
+[project.entry-points."smartem_models.gridsquare.updated"]
+"resnet-holes" = "smartem_models.resnet_classifier.service_holes:infer"
 
 [project.entry-points."smartem_models.grid.registered.signature"]
 "resnet-atlas" = "smartem_models.resnet_classifier.parameter_models:InferenceParameters"
-"resnet-holes" = "smartem_models.resnet_classifier.parameter_models:HoleInferenceParameters"
 "dae-atlas" ="smartem_models.clustering.service_atlas:InitParameters"
+
+[project.entry-points."smartem_models.gridsquare.created.signature"]
+"resnet-holes" = "smartem_models.resnet_classifier.parameter_models:HoleInferenceParameters"
+
+[project.entry-points."smartem_models.gridsquare.updated.signature"]
+"resnet-holes" = "smartem_models.resnet_classifier.parameter_models:HoleInferenceParameters"
 
 [project.urls]
 GitHub = "https://github.com/DiamondLightSource/smartem-models"
