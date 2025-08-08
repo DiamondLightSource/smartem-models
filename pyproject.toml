@@ -83,11 +83,9 @@ no-build-isolation-package = ["escnn"]
 [tool.uv.sources]
 torch = [
   { index = "pytorch-cpu", extra = "torchcpu" },
-  { index = "pytorch-cu128", extra = "torchgpu" },
 ]
 torchvision = [
   { index = "pytorch-cpu", extra = "torchcpu" },
-  { index = "pytorch-cu128", extra = "torchgpu" },
 ]
 
 [[tool.uv.index]]
