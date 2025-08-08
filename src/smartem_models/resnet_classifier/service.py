@@ -79,16 +79,17 @@ def infer(params: InferenceParameters) -> None:
     else:
         size_threshold = 0
 
+    img_transform = transforms.Compose(
+        [
+            transforms.ToPILImage(),
+            transforms.Resize((256, 256)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ]
+    )
+
     scores = {}
     for s, pos in gs_positions.items():
-        img_transform = transforms.Compose(
-            [
-                transforms.ToPILImage(),
-                transforms.Resize((256, 256)),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            ]
-        )
         score: float = 0
         total_size_x = 0
         total_size_y = 0
@@ -120,9 +121,7 @@ def infer(params: InferenceParameters) -> None:
         score /= len(pos)
         scores[s] = score * np.sqrt(total_size_x * total_size_y) * (1 if _boundary_check(s) else 0)
 
-    max_score = np.max(list(scores.values()))
-
     for k, v in scores.items():
-        publish_gridsquare_model_prediction(gridsquare_uuid=k, model_name=model_name, prediction_value=v / max_score)
+        publish_gridsquare_model_prediction(gridsquare_uuid=k, model_name=model_name, prediction_value=v)
 
     return None
