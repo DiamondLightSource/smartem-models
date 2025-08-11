@@ -18,11 +18,12 @@ COPY ./smartem-decisions ./smartem-decisions
 WORKDIR /app/smartem-models
 # Install the package using pyproject.toml and setup.py
 # This will also handle copying _version.py files and .env.example → .env
-RUN uv sync --extra torchgpu
-RUN uv pip install "../smartem-decisions[backend]" uvicorn pyyaml
+RUN uv sync --locked --extra torchgpu 
+RUN uv pip install --no-cache "../smartem-decisions[backend]" uvicorn
 
 # The runtime stage copies the built venv into a slim runtime container
 FROM python:${PYTHON_VERSION}-slim AS runtime
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 ARG groupid
 ARG userid
@@ -32,10 +33,9 @@ RUN groupadd -r -g "${groupid}" "${groupname}" && useradd -r -M "${groupname}" -
 # Add apt-get system dependencies for runtime here if needed
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
+    git \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=build /app/ /app/
-ENV PATH=/smatem-models/.venv/bin:$PATH
-
-USER "${userid}":"${groupid}"
+COPY --from=build --chown="${userid}:${groupname}" /app/ /app/
+ENV PATH=/app/smartem-models/.venv/bin:$PATH
 
 ENTRYPOINT ["/bin/bash"]

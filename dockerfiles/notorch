@@ -32,9 +32,10 @@ RUN groupadd -r -g "${groupid}" "${groupname}" && useradd -r -M "${groupname}" -
 # Add apt-get system dependencies for runtime here if needed
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
+    git \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=build /app/ /app/
-ENV PATH=/smatem-models/.venv/bin:$PATH
+COPY --from=build --chown="${userid}:${groupname}" /app/ /app/
+ENV PATH=/app/smatem-models/.venv/bin:$PATH
 
 
 ENTRYPOINT ["/bin/bash"]
