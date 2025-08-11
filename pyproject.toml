@@ -25,18 +25,18 @@ readme = "README.md"
 requires-python = ">=3.12"
 
 [project.optional-dependencies]
-torch-gpu = [
-    "escnn==1.0.11",
+torchgpu = [
     "scikit-learn",
-    "torch==2.7.1",
+    "torch",
     "torchvision",
 ]
-torch-cpu = [
-    "escnn==1.0.11",
+torchcpu = [
     "scikit-learn",
-    "torch==2.7.1+cpu",
+    "torch",
     "torchvision",
 ]
+escnn = ["escnn==1.0.11"]
+
 
 [project.scripts]
 "smartem_models.service" = "smartem_models.cli.service:run"
@@ -46,20 +46,14 @@ torch-cpu = [
 "resnet-atlas" = "smartem_models.resnet_classifier.service:infer"
 "dae-atlas" = "smartem_models.clustering.service_atlas:initialise"
 
-[project.entry-points."smartem_models.gridsquare.created"]
-"resnet-holes" = "smartem_models.resnet_classifier.service_holes:infer"
-
-[project.entry-points."smartem_models.gridsquare.updated"]
+[project.entry-points."smartem_models.gridsquare.registered"]
 "resnet-holes" = "smartem_models.resnet_classifier.service_holes:infer"
 
 [project.entry-points."smartem_models.grid.registered.signature"]
 "resnet-atlas" = "smartem_models.resnet_classifier.parameter_models:InferenceParameters"
 "dae-atlas" ="smartem_models.clustering.service_atlas:InitParameters"
 
-[project.entry-points."smartem_models.gridsquare.created.signature"]
-"resnet-holes" = "smartem_models.resnet_classifier.parameter_models:HoleInferenceParameters"
-
-[project.entry-points."smartem_models.gridsquare.updated.signature"]
+[project.entry-points."smartem_models.gridsquare.registered.signature"]
 "resnet-holes" = "smartem_models.resnet_classifier.parameter_models:HoleInferenceParameters"
 
 [project.urls]
@@ -76,6 +70,27 @@ name = "Jaehoon Cha"
 [[project.authors]] # Further authors may be added by duplicating this section
 email = "val.redchenko@diamond.ac.uk"
 name = "Val Redchenko"
+
+[tool.uv]
+no-build-isolation-package = ["escnn"]
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cpu", extra = "torchcpu" },
+]
+torchvision = [
+  { index = "pytorch-cpu", extra = "torchcpu" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
 
 [tool.setuptools]
 package-dir = {"" = "src"}

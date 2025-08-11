@@ -1,0 +1,41 @@
+ARG PYTHON_VERSION=3.12
+FROM python:${PYTHON_VERSION} AS developer
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Add any system dependencies for the developer/build environment here
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    graphviz \
+    libpq-dev \
+    gfortran \
+    && rm -rf /var/lib/apt/lists/*
+
+# The build stage installs the context into the venv
+FROM developer AS build
+WORKDIR /app
+# Copy the entire repository content to /app (not /context)
+COPY ./smartem-models ./smartem-models
+COPY ./smartem-decisions ./smartem-decisions
+WORKDIR /app/smartem-models
+# Install the package using pyproject.toml and setup.py
+# This will also handle copying _version.py files and .env.example → .env
+RUN uv sync --locked --extra torchgpu 
+RUN uv pip install --no-cache "../smartem-decisions[backend]" uvicorn
+
+# The runtime stage copies the built venv into a slim runtime container
+FROM python:${PYTHON_VERSION}-slim AS runtime
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+ARG groupid
+ARG userid
+ARG groupname
+RUN groupadd -r -g "${groupid}" "${groupname}" && useradd -r -M "${groupname}" -u "${userid}" -g "${groupname}"
+
+# Add apt-get system dependencies for runtime here if needed
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build --chown="${userid}:${groupname}" /app/ /app/
+ENV PATH=/app/smartem-models/.venv/bin:$PATH
+
+ENTRYPOINT ["/bin/bash"]
