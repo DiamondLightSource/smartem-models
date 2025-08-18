@@ -51,7 +51,7 @@ escnn = ["escnn==1.0.11"]
 
 [project.entry-points."smartem_models.grid.registered.signature"]
 "resnet-atlas" = "smartem_models.resnet_classifier.parameter_models:InferenceParameters"
-"dae-atlas" ="smartem_models.clustering.service_atlas:InitParameters"
+"dae-atlas" ="smartem_models.clustering.parameter_models:InitParameters"
 
 [project.entry-points."smartem_models.gridsquare.registered.signature"]
 "resnet-holes" = "smartem_models.resnet_classifier.parameter_models:HoleInferenceParameters"
@@ -73,13 +73,21 @@ name = "Val Redchenko"
 
 [tool.uv]
 no-build-isolation-package = ["escnn"]
+conflicts = [
+  [
+    { extra = "torchcpu" },
+    { extra = "torchgpu" },
+  ],
+]
 
 [tool.uv.sources]
 torch = [
   { index = "pytorch-cpu", extra = "torchcpu" },
+  { index = "pytorch-cu126", extra = "torchgpu" },
 ]
 torchvision = [
   { index = "pytorch-cpu", extra = "torchcpu" },
+  { index = "pytorch-cu126", extra = "torchgpu" },
 ]
 
 [[tool.uv.index]]
@@ -88,8 +96,8 @@ url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
 explicit = true
 
 [tool.setuptools]
@@ -169,9 +177,4 @@ lint.select = [
     "UP",  # pyupgrade - https://docs.astral.sh/ruff/rules/#pyupgrade-up
     "SLF", # self - https://docs.astral.sh/ruff/settings/#lintflake8-self
 ]
-
-[tool.ruff.lint.per-file-ignores]
-# By default, private member access is allowed in tests
-# See https://github.com/DiamondLightSource/python-copier-template/issues/154
-# Remove this line to forbid private member access in tests
-"tests/**/*" = ["SLF001"]
+lint.ignore = ["SLF001"]

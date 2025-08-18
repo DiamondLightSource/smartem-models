@@ -3,9 +3,8 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from pydantic import BaseModel
 from sklearn.cluster import KMeans
-from smartem_backend.model.database import Acquisition, Grid, GridSquare
+from smartem_backend.model.database import Grid, GridSquare
 from smartem_backend.utils import setup_postgres_connection
 from sqlmodel import Session, select
 from torch.autograd import Variable
@@ -16,43 +15,33 @@ from smartem_models.clustering.calldata import SquareAtlasMagDataset
 from smartem_models.clustering.grid_clustering import train
 from smartem_models.clustering.models import EIAE
 from smartem_models.clustering.service import _set_model_parameters
+from smartem_models.parameter_models import InitParameters
 from smartem_models.utils.parameter_updating_cluster import init_distributions
 
 model_name = "dae-atlas"
 
 
-class InitParameters(BaseModel):
-    grid_uuid: str
-    batch_size: int = 16
-    seed: int = 10
-    input_model: Path | None = None
-    input_dim: tuple[int, ...] = (1, 64, 64)
-    hidden_dims: tuple[int, ...] = (1, 16, 32, 64, 128)
-    latent_space_dim: int = 2
-    learning_rate: float = 0.0005
-    num_epochs: int = 500
-    model_output_path: str = ""
-    kmeans_output_path: str = ""
+def _find_atlas_image(parent: Path) -> Path:
+    if mrcs := list(parent.glob("Atlas_*.mrc")):
+        return mrcs[0]
+    if tiffs := list(parent.glob("Atlas_*.tiff")):
+        return tiffs[0]
+    raise FileNotFoundError(f"No atlas image found in {parent}")
 
 
 def initialise(params: InitParameters) -> None:
     engine = setup_postgres_connection()
     with Session(engine) as session:
         grid_squares = session.exec(select(GridSquare).where(GridSquare.grid_uuid == params.grid_uuid)).all()
-        atlas_path = (
-            session.exec(
-                select(Grid, Acquisition)
-                .where(Grid.uuid == params.grid_uuid)
-                .where(Grid.acquisition_uuid == Acquisition.uuid)
-            )
-            .all()[0][1]
-            .atlas_path
+        atlas_path = _find_atlas_image(
+            Path(session.exec(select(Grid).where(Grid.uuid == params.grid_uuid)).all()[0].atlas_dir)
         )
         s = int(
             1.1
             * np.max([np.max([gs.size_width for gs in grid_squares]), np.max([gs.size_height for gs in grid_squares])])
         )
 
+    torch.set_num_threads(params.num_threads)
     square_positions = {gs.uuid: (gs.center_x, gs.center_y) for gs in grid_squares if gs.center_x is not None}
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     train_x = SquareAtlasMagDataset(
