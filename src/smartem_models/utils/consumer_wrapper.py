@@ -1,5 +1,6 @@
 import json
 from collections.abc import Callable
+from threading import Thread
 
 from pika.channel import Channel
 from pika.frame import Body, Method
@@ -14,10 +15,15 @@ def consume(func: Callable, queue_name: str, message_format: type[BaseModel]):
     def on_message(channel: Channel, method: Method, properties: BasicProperties, body: Body):
         message = message_format(**json.loads(body.decode()))
         try:
-            func(message)
+
+            def _func_in_thread():
+                func(message)
+                con._connection.add_callback_threadsafe(lambda: channel.basic_ack(method.delivery_tag))
+
+            t = Thread(target=_func_in_thread)
+            t.start()
         except Exception:
             channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
             return
-        channel.basic_ack(delivery_tag=method.delivery_tag)
 
     con.consume(on_message, prefetch_count=1)

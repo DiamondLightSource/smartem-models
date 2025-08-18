@@ -3,7 +3,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from pydantic import BaseModel
 from sklearn.cluster import KMeans
 from smartem_backend.model.database import GridSquare, QualityPredictionModelParameter
 from smartem_backend.mq_publisher import publish_gridsquare_model_prediction, publish_model_parameter_update
@@ -16,6 +15,7 @@ from torchvision import transforms
 from smartem_models.clustering.calldata import SquareDataset, prepare_image
 from smartem_models.clustering.grid_clustering import train
 from smartem_models.clustering.models import EIAE
+from smartem_models.parameter_models import InferenceParameters, InitParameters, UpdateParameters
 from smartem_models.utils import read_img
 from smartem_models.utils.parameter_updating_cluster import init_distributions, score, update_distribution
 
@@ -61,20 +61,6 @@ def _set_model_parameters(
     return None
 
 
-class InitParameters(BaseModel):
-    grid_uuid: str
-    batch_size: int = 16
-    seed: int = 10
-    input_model: Path | None = None
-    input_dim: tuple[int, ...] = (1, 64, 64)
-    hidden_dims: tuple[int, ...] = (1, 16, 32, 64, 128)
-    latent_space_dim: int = 2
-    learning_rate: float = 0.0005
-    num_epochs: int = 1000
-    model_output_path: str = ""
-    kmeans_output_path: str = ""
-
-
 def initialise(params: InitParameters) -> None:
     engine = setup_postgres_connection()
     with Session(engine) as session:
@@ -86,6 +72,7 @@ def initialise(params: InitParameters) -> None:
     train_x = SquareDataset(square_imgs, transform=transforms.Resize(params.input_dim[-1], antialias=True))
     train_dataloader = DataLoader(train_x, batch_size=params.batch_size, shuffle=True, pin_memory=True)
 
+    torch.set_num_threads(params.num_threads)
     np.random.seed(params.seed)
     torch.manual_seed(params.seed)
 
@@ -165,18 +152,8 @@ def _add_cluster_index(grid_uuid: str, cluster_index: int, gridsquare: str, coor
     return None
 
 
-class InferenceParameters(BaseModel):
-    grid_uuid: str
-    model_path: Path
-    gridsquare_img_path: Path
-    gridsquare_uuid: str
-    kmeans_path: str
-    input_dim: tuple[int, ...] = (1, 64, 64)
-    hidden_dims: tuple[int, ...] = (1, 16, 32, 64, 128)
-    latent_space_dim: int = 2
-
-
 def infer(params: InferenceParameters):
+    torch.set_num_threads(params.num_threads)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = EIAE(
         alpha=torch.Tensor([[1.0, 1.0]]).to(device),
@@ -262,13 +239,6 @@ def _record_score(score: float, gridsquare_uuid: str) -> None:
         prediction_value=score,
     )
     return None
-
-
-class UpdateParameters(BaseModel):
-    quality: bool
-    cluster_index: int
-    grid_uuid: str
-    gridsquare_uuid: str
 
 
 def update(params: UpdateParameters) -> None:
