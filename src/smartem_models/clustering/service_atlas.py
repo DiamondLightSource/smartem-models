@@ -15,7 +15,7 @@ from smartem_models.clustering.calldata import SquareAtlasMagDataset
 from smartem_models.clustering.grid_clustering import train
 from smartem_models.clustering.models import EIAE
 from smartem_models.clustering.service import _set_model_parameters
-from smartem_models.parameter_models import InitParameters
+from smartem_models.parameter_models_atlas import InitParameters
 from smartem_models.utils.parameter_updating_cluster import init_distributions
 
 model_name = "dae-atlas"

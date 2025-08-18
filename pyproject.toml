@@ -51,7 +51,7 @@ escnn = ["escnn==1.0.11"]
 
 [project.entry-points."smartem_models.grid.registered.signature"]
 "resnet-atlas" = "smartem_models.resnet_classifier.parameter_models:InferenceParameters"
-"dae-atlas" ="smartem_models.clustering.parameter_models:InitParameters"
+"dae-atlas" ="smartem_models.clustering.parameter_models_atlas:InitParameters"
 
 [project.entry-points."smartem_models.gridsquare.registered.signature"]
 "resnet-holes" = "smartem_models.resnet_classifier.parameter_models:HoleInferenceParameters"
