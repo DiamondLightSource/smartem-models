@@ -45,6 +45,8 @@ escnn = ["escnn==1.0.11"]
 [project.entry-points."smartem_models.grid.registered"]
 "resnet-atlas" = "smartem_models.resnet_classifier.service:infer"
 "dae-atlas" = "smartem_models.clustering.service_atlas:initialise"
+"dae-square-init" = "smartem_models.clustering.service:initialise"
+"dae-square-infer" = "smartem_models.clustering.service:infer"
 
 [project.entry-points."smartem_models.gridsquare.registered"]
 "resnet-holes" = "smartem_models.resnet_classifier.service_holes:infer"
@@ -52,6 +54,8 @@ escnn = ["escnn==1.0.11"]
 [project.entry-points."smartem_models.grid.registered.signature"]
 "resnet-atlas" = "smartem_models.resnet_classifier.parameter_models:InferenceParameters"
 "dae-atlas" ="smartem_models.clustering.parameter_models_atlas:InitParameters"
+"dae-square-init" ="smartem_models.clustering.parameter_models:InitParameters"
+"dae-square-infer" ="smartem_models.clustering.parameter_models:InferenceParameters"
 
 [project.entry-points."smartem_models.gridsquare.registered.signature"]
 "resnet-holes" = "smartem_models.resnet_classifier.parameter_models:HoleInferenceParameters"
