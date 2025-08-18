@@ -3,7 +3,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from pydantic import BaseModel
 from sklearn.cluster import KMeans
 from smartem_backend.model.database import FoilHole, GridSquare, QualityPredictionModelParameter
 from smartem_backend.utils import setup_postgres_connection
@@ -16,24 +15,11 @@ from smartem_models.clustering.calldata import HoleDataset, prepare_image
 from smartem_models.clustering.grid_clustering import train
 from smartem_models.clustering.models import EIAE
 from smartem_models.clustering.service import _add_cluster_index, _record_dist, _record_score, _set_model_parameters
+from smartem_models.parameter_models_holes import InferenceParameters, InitParameters, UpdateParameters
 from smartem_models.utils import read_img
 from smartem_models.utils.parameter_updating_cluster import init_distributions, score, update_distribution
 
 model_name = "dae-hole"
-
-
-class InitParameters(BaseModel):
-    grid_uuid: str
-    batch_size: int = 16
-    seed: int = 10
-    input_model: Path | None = None
-    input_dim: tuple[int, ...] = (1, 32, 32)
-    hidden_dims: tuple[int, ...] = (1, 16, 32, 64, 128)
-    latent_space_dim: int = 2
-    learning_rate: float = 0.0005
-    num_epochs: int = 1000
-    model_output_path: str = ""
-    kmeans_output_path: str = ""
 
 
 def initialise(params: InitParameters) -> None:
@@ -58,6 +44,7 @@ def initialise(params: InitParameters) -> None:
                 diameter = foil_holes[0].diameter
             foil_hole_positions.append([(fh.x_location, fh.y_location) for fh in foil_holes])
 
+    torch.set_num_threads(params.num_threads)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     if diameter is None:
@@ -131,18 +118,8 @@ def initialise(params: InitParameters) -> None:
     return None
 
 
-class InferenceParameters(BaseModel):
-    grid_uuid: str
-    model_path: Path
-    gridsquare_img_path: Path
-    gridsquare_uuid: str
-    kmeans_path: str
-    input_dim: tuple[int, ...] = (1, 64, 64)
-    hidden_dims: tuple[int, ...] = (1, 16, 32, 64, 128)
-    latent_space_dim: int = 2
-
-
 def infer(params: InferenceParameters):
+    torch.set_num_threads(params.num_threads)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = EIAE(
         alpha=torch.Tensor([[1.0, 1.0]]).to(device),
@@ -180,13 +157,6 @@ def _get_dist(grid_uuid: str, cluster_index: int, num_steps: int = 10) -> np.arr
     for mp in model_parameters:
         dist[int(mp.key)] = mp.value
     return dist
-
-
-class UpdateParameters(BaseModel):
-    quality: bool
-    cluster_index: int
-    grid_uuid: str
-    foilhole_uuid: str
 
 
 def update(params: UpdateParameters) -> None:
