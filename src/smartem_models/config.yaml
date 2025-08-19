@@ -2,6 +2,7 @@ registered_models:
   - resnet-atlas
   - resnet-holes
   - dae-atlas
+  - dae-hole
 
 processing_queues:
   resnet-atlas: 
@@ -11,6 +12,10 @@ processing_queues:
     gridsquare.updated: resnet_holes_infer
   dae-atlas:
     grid.registered: dae_atlas_init
+  dae-hole-init:
+    gridsquare.registered: dae_hole_init
+  dae-hole-infer:
+    gridsquare.registered: dae_hole_infer
 
 distributed:
   resnet-atlas: 
@@ -20,6 +25,10 @@ distributed:
     gridsquare.updated: false
   dae-atlas:
     grid.registered: true
+  dae-hole-init:
+    gridsquare.registered: true
+  dae-hole-infer:
+    gridsquare.registered: true
 
 model_parameters:
   resnet-atlas:
@@ -33,3 +42,18 @@ model_parameters:
   dae-atlas:
     grid.registered:
       model_path: "/path/to/starting/weights"
+  dae-hole-init:
+    gridsquare.registered:
+      model_path: "/path/to/starting/weights"
+  dae-hole-infer:
+    gridsquare.registered:
+      model_path: "/path/to/starting/weights"
+
+act_on_count:
+  dae-hole-init:
+    gridsquare.registered:
+      - 5
+
+  minimum_count:
+    dae-hole-infer:
+      gridsquare.registered: 6

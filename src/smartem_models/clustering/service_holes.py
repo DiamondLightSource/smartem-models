@@ -5,7 +5,9 @@ import numpy as np
 import torch
 from sklearn.cluster import KMeans
 from smartem_backend.model.database import FoilHole, GridSquare, QualityPredictionModelParameter
+from smartem_backend.mq_publisher import publish_gridsquare_registered
 from smartem_backend.utils import setup_postgres_connection
+from smartem_common.entity_status import GridSquareStatus
 from sqlmodel import Session, select
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
@@ -108,6 +110,18 @@ def initialise(params: InitParameters) -> None:
     if params.kmeans_output_path:
         with open(params.kmeans_output_path, "wb") as pkl:
             pickle.dump(kmeans, pkl)
+
+    # after writing files used in inference check for grid squares that need to have inference run
+    with Session(engine) as session:
+        registered_grid_squares = session.exec(
+            select(GridSquare)
+            .where(GridSquare.grid_uuid == params.grid_uuid)
+            .where(GridSquare.status == GridSquareStatus.REGISTERED)
+        ).all()
+    init_square_ids = [gs.uuid for gs in grid_squares]
+    for rs in registered_grid_squares:
+        if rs.uuid not in init_square_ids:
+            publish_gridsquare_registered(rs.uuid)
 
     _set_model_parameters(
         init_dists,

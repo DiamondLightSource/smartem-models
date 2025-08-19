@@ -72,6 +72,9 @@ def on_message(channel: Channel, method: Method, properties: BasicProperties, bo
             if (requested_counts := config.get("act_on_count", {}).get(hook.name, {}).get(event_type)) is not None:
                 if count_functions[event_type](message) not in requested_counts:
                     break
+            if (minimum_count := config.get("minimum_count", {}).get(hook.name, {}).get(event_type)) is not None:
+                if count_functions[event_type](message) != minimum_count:
+                    break
             try:
                 publish_request(
                     config.get("processing_queues", {}).get(hook.name, {}).get(event_type, ""),
