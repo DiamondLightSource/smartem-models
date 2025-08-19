@@ -133,6 +133,8 @@ def initialise(params: InitParameters) -> None:
 
 
 def infer(params: InferenceParameters):
+    if not params.model_path.is_file() or not params.kmeans_path.is_file():
+        return None
     torch.set_num_threads(params.num_threads)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = EIAE(
