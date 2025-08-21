@@ -15,7 +15,7 @@ from torchvision import transforms
 from smartem_models.clustering.calldata import SquareDataset, prepare_image
 from smartem_models.clustering.grid_clustering import train
 from smartem_models.clustering.models import EIAE
-from smartem_models.parameter_models import InferenceParameters, InitParameters, UpdateParameters
+from smartem_models.clustering.parameter_models import InferenceParameters, InitParameters, UpdateParameters
 from smartem_models.utils import read_img
 from smartem_models.utils.parameter_updating_cluster import init_distributions, score, update_distribution
 
