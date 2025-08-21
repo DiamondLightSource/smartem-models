@@ -34,7 +34,7 @@ def initialise(params: InitParameters) -> None:
     with Session(engine) as session:
         grid_squares = session.exec(select(GridSquare).where(GridSquare.grid_uuid == params.grid_uuid)).all()
         atlas_path = _find_atlas_image(
-            Path(session.exec(select(Grid).where(Grid.uuid == params.grid_uuid)).all()[0].atlas_dir)
+            Path(session.exec(select(Grid).where(Grid.uuid == params.grid_uuid)).all()[0].atlas_dir).parent
         )
         s = int(
             1.1
