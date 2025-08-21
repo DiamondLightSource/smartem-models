@@ -16,8 +16,8 @@ from torchvision import transforms
 from smartem_models.clustering.calldata import HoleDataset, prepare_image
 from smartem_models.clustering.grid_clustering import train
 from smartem_models.clustering.models import EIAE
+from smartem_models.clustering.parameter_models_holes import InferenceParameters, InitParameters, UpdateParameters
 from smartem_models.clustering.service import _add_cluster_index, _record_dist, _record_score, _set_model_parameters
-from smartem_models.parameter_models_holes import InferenceParameters, InitParameters, UpdateParameters
 from smartem_models.utils import read_img
 from smartem_models.utils.parameter_updating_cluster import init_distributions, score, update_distribution
 
