@@ -74,11 +74,6 @@ def infer(params: InferenceParameters) -> None:
     def _area(positions: list[GridSquarePosition]) -> int:
         return np.sum([(pos.image.size[0] * pos.image.size[1]) for pos in positions])
 
-    if np.std([_area(tmps) for tmps in gs_positions.values()]) > 50:
-        size_threshold = np.quantile(np.array([_area(tmps) for tmps in gs_positions.values()]), 0.5)
-    else:
-        size_threshold = 0
-
     img_transform = transforms.Compose(
         [
             transforms.ToPILImage(),
@@ -89,14 +84,12 @@ def infer(params: InferenceParameters) -> None:
     )
 
     scores = {}
+    areas = []
     for s, pos in gs_positions.items():
         score: float = 0
         total_size_x = 0
         total_size_y = 0
         images = [p.image for p in pos]
-        if _area(pos) < size_threshold:
-            scores[s] = 0
-            continue
         for template in images:
             inputs = np.array(template)
             inputs = inputs.astype("int16")
@@ -119,7 +112,11 @@ def infer(params: InferenceParameters) -> None:
             total_size_y += template.size[1]
 
         score /= len(pos)
-        scores[s] = score * np.sqrt(total_size_x * total_size_y) * (1 if _boundary_check(s) else 0)
+        scores[s] = score * (total_size_x * total_size_y) * (1 if _boundary_check(s) else 0)
+        areas.append(total_size_x * total_size_y)
+
+    max_area = np.max(areas)
+    scores = {k: v / max_area for k, v in scores.items()}
 
     for k, v in scores.items():
         publish_gridsquare_model_prediction(gridsquare_uuid=k, model_name=model_name, prediction_value=v)

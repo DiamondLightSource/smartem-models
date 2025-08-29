@@ -26,12 +26,13 @@ def _set_model_parameters(
     dists: np.array,
     coords: list[tuple[str, tuple[float, float], int]],
     grid_uuid: str,
+    model: str = model_name,
 ) -> None:
     for i, d in enumerate(dists):
         for j in range(len(d)):
             publish_model_parameter_update(
                 grid_uuid=grid_uuid,
-                model_name=model_name,
+                model_name=model,
                 key=str(j),
                 value=float(d[j]),
                 group=f"dist:{i}",
@@ -39,21 +40,21 @@ def _set_model_parameters(
     for c in coords:
         publish_model_parameter_update(
             grid_uuid=grid_uuid,
-            model_name=model_name,
+            model_name=model,
             key="x",
             value=float(c[1][0]),
             group=f"coordinates:{c[0]}",
         )
         publish_model_parameter_update(
             grid_uuid=grid_uuid,
-            model_name=model_name,
+            model_name=model,
             key="y",
             value=float(c[1][1]),
             group=f"coordinates:{c[0]}",
         )
         publish_model_parameter_update(
             grid_uuid=grid_uuid,
-            model_name=model_name,
+            model_name=model,
             key=str(c[0]),
             value=float(c[2]),
             group="cluster_indices",
@@ -127,24 +128,26 @@ def initialise(params: InitParameters) -> None:
     return None
 
 
-def _add_cluster_index(grid_uuid: str, cluster_index: int, gridsquare: str, coords: np.array) -> None:
+def _add_cluster_index(
+    grid_uuid: str, cluster_index: int, gridsquare: str, coords: np.array, model: str = model_name
+) -> None:
     publish_model_parameter_update(
         grid_uuid=grid_uuid,
-        model_name=model_name,
+        model_name=model,
         key="x",
         value=coords[0],
         group=f"coordinates:{gridsquare}",
     )
     publish_model_parameter_update(
         grid_uuid=grid_uuid,
-        model_name=model_name,
+        model_name=model,
         key="y",
         value=coords[1],
         group=f"coordinates:{gridsquare}",
     )
     publish_model_parameter_update(
         grid_uuid=grid_uuid,
-        model_name=model_name,
+        model_name=model,
         key=gridsquare,
         value=cluster_index,
         group="cluster_indices",
@@ -218,13 +221,13 @@ def _get_dist(grid_uuid: str, cluster_index: int, num_steps: int = 10) -> np.arr
     return dist
 
 
-def _record_dist(dist: np.array, grid_uuid: str, cluster_index: int) -> None:
+def _record_dist(dist: np.array, grid_uuid: str, cluster_index: int, model: str = model_name) -> None:
     if np.sum(dist) == 0:
         return None
     for j in range(len(dist)):
         publish_model_parameter_update(
             grid_uuid=grid_uuid,
-            model_name=model_name,
+            model_name=model,
             key=str(j),
             group=f"dist:{cluster_index}",
             value=dist[j],
@@ -232,10 +235,10 @@ def _record_dist(dist: np.array, grid_uuid: str, cluster_index: int) -> None:
     return None
 
 
-def _record_score(score: float, gridsquare_uuid: str) -> None:
+def _record_score(score: float, gridsquare_uuid: str, model: str = model_name) -> None:
     publish_gridsquare_model_prediction(
         gridsquare_uuid=gridsquare_uuid,
-        model_name=model_name,
+        model_name=model,
         prediction_value=score,
     )
     return None

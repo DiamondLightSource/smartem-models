@@ -82,6 +82,8 @@ def initialise(params: InitParameters) -> None:
             latent_coords[grid_squares[label].uuid] = coords[i]
 
     num_clusters = len(latent_coords) // 5
+    if num_clusters > 10:
+        num_clusters = 10
     labelled_coords = list(latent_coords.items())
     kmeans = KMeans(n_clusters=num_clusters, random_state=0, n_init="auto").fit(
         np.array([p[1] for p in labelled_coords])
@@ -98,6 +100,6 @@ def initialise(params: InitParameters) -> None:
         with open(params.kmeans_output_path, "wb") as pkl:
             pickle.dump(kmeans, pkl)
 
-    _set_model_parameters(init_dists, labelled_coords, params.grid_uuid)
+    _set_model_parameters(init_dists, labelled_coords, params.grid_uuid, model=model_name)
 
     return None

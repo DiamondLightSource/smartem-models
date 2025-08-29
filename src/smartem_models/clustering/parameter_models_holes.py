@@ -12,17 +12,15 @@ class InitParameters(BaseModel):
     hidden_dims: tuple[int, ...] = (1, 16, 32, 64, 128)
     latent_space_dim: int = 2
     learning_rate: float = 0.0005
-    num_epochs: int = 1000
+    num_epochs: int = 500
     model_output_path: str = ""
     kmeans_output_path: str = ""
     num_threads: int = 2
 
 
 class InferenceParameters(BaseModel):
-    grid_uuid: str
+    uuid: str  # gridsquare uuid
     model_path: Path
-    gridsquare_img_path: Path
-    gridsquare_uuid: str
     kmeans_path: str
     input_dim: tuple[int, ...] = (1, 64, 64)
     hidden_dims: tuple[int, ...] = (1, 16, 32, 64, 128)

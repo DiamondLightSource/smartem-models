@@ -27,7 +27,8 @@ model_name = "dae-hole"
 def initialise(params: InitParameters) -> None:
     engine = setup_postgres_connection()
     with Session(engine) as session:
-        grid_squares = session.exec(select(GridSquare).where(GridSquare.grid_uuid == params.grid_uuid)).all()
+        grid_uuid = session.exec(select(GridSquare).where(GridSquare.uuid == params.uuid)).one().grid_uuid
+        grid_squares = session.exec(select(GridSquare).where(GridSquare.grid_uuid == grid_uuid)).all()
     grid_squares = [gs for gs in grid_squares if gs.image_path]
     if not all(gs.image_path for gs in grid_squares):
         return None
@@ -115,7 +116,7 @@ def initialise(params: InitParameters) -> None:
     with Session(engine) as session:
         registered_grid_squares = session.exec(
             select(GridSquare)
-            .where(GridSquare.grid_uuid == params.grid_uuid)
+            .where(GridSquare.grid_uuid == grid_uuid)
             .where(GridSquare.status == GridSquareStatus.REGISTERED)
         ).all()
     init_square_ids = [gs.uuid for gs in grid_squares]
@@ -126,7 +127,8 @@ def initialise(params: InitParameters) -> None:
     _set_model_parameters(
         init_dists,
         labelled_coords,
-        params.grid_uuid,
+        grid_uuid,
+        model=model_name,
     )
 
     return None
@@ -145,12 +147,17 @@ def infer(params: InferenceParameters):
     )
     model.load_state_dict(torch.load(params.model_path, weights_only=True, map_location=device))
     model.eval()
-    img = transforms.Resize(params.input_dim[-1], antialias=True)(prepare_image(read_img(params.gridsquare_img_path)))
+    engine = setup_postgres_connection()
+    with Session(engine) as session:
+        gs = session.exec(select(GridSquare).where(GridSquare.uuid == params.uuid)).one()
+        grid_uuid = gs.grid_uuid
+        gridsquare_img_path = Path(gs.image_path)
+    img = transforms.Resize(params.input_dim[-1], antialias=True)(prepare_image(read_img(gridsquare_img_path)))
     coords = model(img.unsqueeze(0))[2].detach().cpu().numpy()
     with open(params.kmeans_path, "rb") as pkl:
         kmeans = pickle.load(pkl)
     cluster_index = kmeans.predict([coords])
-    _add_cluster_index(params.grid_uuid, cluster_index, params.gridsquare_uuid, coords)
+    _add_cluster_index(grid_uuid, cluster_index, params.uuid, coords, model=model_name)
     return coords
 
 
@@ -178,7 +185,7 @@ def _get_dist(grid_uuid: str, cluster_index: int, num_steps: int = 10) -> np.arr
 def update(params: UpdateParameters) -> None:
     dist = _get_dist(params.grid_uuid, params.cluster_index)
     dist = update_distribution(dist, params.quality)
-    _record_dist(dist, params.grid_uuid, params.cluster_index)
+    _record_dist(dist, params.grid_uuid, params.cluster_index, model=model_name)
     post_update_score = score(dist, params.cluster_index)
-    _record_score(post_update_score, params.foilhole_uuid, params.grid_uuid, params.cluster_index)
+    _record_score(post_update_score, params.foilhole_uuid, params.grid_uuid, params.cluster_index, model=model_name)
     return None
