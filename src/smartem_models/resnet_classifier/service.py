@@ -84,11 +84,8 @@ def infer(params: InferenceParameters) -> None:
     )
 
     scores = {}
-    areas = []
     for s, pos in gs_positions.items():
         score: float = 0
-        total_size_x = 0
-        total_size_y = 0
         images = [p.image for p in pos]
         for template in images:
             inputs = np.array(template)
@@ -108,15 +105,9 @@ def infer(params: InferenceParameters) -> None:
             predicted = predicted.detach().cpu().numpy()
             predicted = 2.0 * predicted - 1
             score += 0.5 * ((predicted * confidence)[0] + 1)
-            total_size_x += template.size[0]
-            total_size_y += template.size[1]
 
         score /= len(pos)
-        scores[s] = score * (total_size_x * total_size_y) * (1 if _boundary_check(s) else 0)
-        areas.append(total_size_x * total_size_y)
-
-    max_area = np.max(areas)
-    scores = {k: v / max_area for k, v in scores.items()}
+        scores[s] = score * (1 if _boundary_check(s) else 0)
 
     for k, v in scores.items():
         publish_gridsquare_model_prediction(gridsquare_uuid=k, model_name=model_name, prediction_value=v)
