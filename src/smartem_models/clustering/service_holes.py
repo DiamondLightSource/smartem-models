@@ -29,7 +29,7 @@ def initialise(params: InitParameters) -> None:
     with Session(engine) as session:
         grid_uuid = session.exec(select(GridSquare).where(GridSquare.uuid == params.uuid)).one().grid_uuid
         grid_squares = session.exec(select(GridSquare).where(GridSquare.grid_uuid == grid_uuid)).all()
-    grid_squares = [gs for gs in grid_squares if gs.image_path]
+    grid_squares = [gs for gs in grid_squares if gs.image_path][: params.num_squares]
     if not all(gs.image_path for gs in grid_squares):
         return None
 
