@@ -6,11 +6,8 @@ from pika.channel import Channel
 from pika.frame import Body, Method
 from pika.spec import BasicProperties
 from pydantic import BaseModel
-from smartem_backend.model.database import GridSquare
 from smartem_backend.model.mq_event import MessageQueueEventType
-from smartem_backend.utils import setup_postgres_connection, setup_rabbitmq
-from sqlalchemy import func
-from sqlmodel import Session, select
+from smartem_backend.utils import setup_rabbitmq
 
 from smartem_models.utils import get_config
 
@@ -30,15 +27,7 @@ def publish_request(
 
 
 def _gridsquare_create_count(message: dict) -> int:
-    engine = setup_postgres_connection()
-    with Session(engine) as session:
-        grid_uuid = session.exec(select(GridSquare).where(GridSquare.uuid == message["uuid"])).one().grid_uuid
-        num_gridsquares = session.exec(
-            select(func.count(GridSquare.uuid))
-            .where(GridSquare.grid_uuid == grid_uuid)
-            .where(GridSquare.image_path.is_not(None))
-        ).one()
-    return num_gridsquares
+    return message["count"]
 
 
 def on_message(channel: Channel, method: Method, properties: BasicProperties, body: Body):
