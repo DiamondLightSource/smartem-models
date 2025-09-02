@@ -1,6 +1,7 @@
+from pathlib import Path
+
 import numpy as np
 import torch
-from pathlib import Path
 from smartem_backend.model.database import FoilHole, GridSquare
 from smartem_backend.mq_publisher import publish_foilhole_model_prediction
 from smartem_backend.utils import setup_postgres_connection
@@ -40,6 +41,8 @@ def infer(params: HoleInferenceParameters) -> None:
         gs_img = read_img(Path(grid_square.image_path), normalise=False)
         foil_holes = session.exec(select(FoilHole).where(FoilHole.gridsquare_uuid == params.uuid)).all()
         foil_holes = [fh for fh in foil_holes if not fh.is_near_grid_bar]
+        if not foil_holes:
+            return None
         diameter = foil_holes[0].diameter
         foil_hole_positions = {fh.uuid: (fh.x_location, fh.y_location) for fh in foil_holes}
 
