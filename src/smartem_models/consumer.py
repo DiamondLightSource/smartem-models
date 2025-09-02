@@ -1,4 +1,5 @@
 import json
+from functools import partial
 from logging import getLogger
 
 from backports.entry_points_selectable import entry_points
@@ -30,7 +31,18 @@ def _gridsquare_create_count(message: dict) -> int:
     return message["count"]
 
 
-def on_message(channel: Channel, method: Method, properties: BasicProperties, body: Body):
+def on_message(
+    channel: Channel,
+    method: Method,
+    properties: BasicProperties,
+    body: Body,
+    hooks: dict | None = None,
+    signatures: dict | None = None,
+    config: dict | None = None,
+):
+    hooks = hooks or {}
+    signatures = signatures or {}
+    config = config or {}
     message = json.loads(body.decode())
     if "event_type" not in message:
         logger.warning(f"Message missing 'event_type' field: {message}")
@@ -43,8 +55,6 @@ def on_message(channel: Channel, method: Method, properties: BasicProperties, bo
     }
 
     event_type = message["event_type"]
-    config = get_config()
-    registered_models = config.get("registered_models", [])
 
     try:
         event = MessageQueueEventType(event_type)
@@ -52,11 +62,8 @@ def on_message(channel: Channel, method: Method, properties: BasicProperties, bo
         logger.warning(f"Event type {event_type} not recognised", exc_info=True)
         channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
         return
-    training_hooks = [
-        e for e in entry_points().select(group=f"smartem_models.{event_type}") if e.name in registered_models
-    ]
-    for hook in training_hooks:
-        ParameterModel = entry_points().select(group=f"smartem_models.{event_type}.signature", name=hook.name)[0].load()
+    for hook in hooks.get(event_type):
+        ParameterModel = signatures.get(event_type, {}).get(hook.name).load()
         params = ParameterModel(**message, **config.get("model_parameters", {}).get(hook.name, {}).get(event_type, ""))
         if config.get("distributed", {}).get(hook.name, {}).get(event_type):
             requested_counts: list[int] | None
@@ -83,4 +90,18 @@ def on_message(channel: Channel, method: Method, properties: BasicProperties, bo
 
 def run():
     pub, con = setup_rabbitmq(queue_name="smartem_models")
-    con.consume(on_message, prefetch_count=1)
+    config = get_config()
+    eps = {
+        k.replace("smartem_models.", ""): v
+        for k, v in entry_points().items()
+        if k.startswith("smartem_models") and not k.endswith("signature")
+    }
+    signatures = {
+        k.replace("smartem_models.", ""): v
+        for k, v in entry_points().items()
+        if k.startswith("smartem_models") and k.endswith("signature")
+    }
+    unwrapped_signatures = {}
+    for k, v in signatures.items():
+        unwrapped_signatures[k] = {w.name: w for w in v}
+    con.consume(partial(on_message, hooks=eps, signatures=unwrapped_signatures, config=config), prefetch_count=1)

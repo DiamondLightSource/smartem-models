@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 
 class InitParameters(BaseModel):
-    grid_uuid: str
+    uuid: str
     batch_size: int = 16
     seed: int = 10
     input_model: Path | None = None
