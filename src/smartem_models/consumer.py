@@ -55,6 +55,7 @@ def on_message(
     }
 
     event_type = message["event_type"]
+    success = True
 
     try:
         event = MessageQueueEventType(event_type)
@@ -64,15 +65,15 @@ def on_message(
         return
     for hook in hooks.get(event_type):
         ParameterModel = signatures.get(event_type, {}).get(hook.name).load()
-        params = ParameterModel(**message, **config.get("model_parameters", {}).get(hook.name, {}).get(event_type, ""))
+        params = ParameterModel(**message, **config.get("model_parameters", {}).get(hook.name, {}).get(event_type, {}))
         if config.get("distributed", {}).get(hook.name, {}).get(event_type):
             requested_counts: list[int] | None
             if (requested_counts := config.get("act_on_count", {}).get(hook.name, {}).get(event_type)) is not None:
                 if count_functions[event_type](message) not in requested_counts:
-                    break
+                    continue
             if (minimum_count := config.get("minimum_count", {}).get(hook.name, {}).get(event_type)) is not None:
                 if count_functions[event_type](message) < minimum_count:
-                    break
+                    continue
             try:
                 publish_request(
                     config.get("processing_queues", {}).get(hook.name, {}).get(event_type, ""),
@@ -80,12 +81,15 @@ def on_message(
                     params,
                 )
             except ValueError:
-                channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-                return
+                success = False
+                continue
         else:
             hook.load()(params)
 
-    channel.basic_ack(delivery_tag=method.delivery_tag)
+    if success:
+        channel.basic_ack(delivery_tag=method.delivery_tag)
+    else:
+        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
 
 def run():
@@ -97,7 +101,7 @@ def run():
         if k.startswith("smartem_models") and not k.endswith("signature")
     }
     signatures = {
-        k.replace("smartem_models.", ""): v
+        k.replace("smartem_models.", "").replace(".signature", ""): v
         for k, v in entry_points().items()
         if k.startswith("smartem_models") and k.endswith("signature")
     }

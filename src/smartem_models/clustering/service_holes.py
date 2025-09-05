@@ -58,8 +58,9 @@ def initialise(params: InitParameters) -> None:
         foil_hole_positions,
         int(1.1 * diameter),
         transform=transforms.Resize(params.input_dim[-1], antialias=True),
+        subset_size=params.subset_size,
     )
-    train_dataloader = DataLoader(train_x, batch_size=params.batch_size, shuffle=True, pin_memory=True)
+    train_dataloader = DataLoader(train_x, batch_size=params.batch_size, shuffle=True, pin_memory=True, drop_last=True)
 
     np.random.seed(params.seed)
     torch.manual_seed(params.seed)
@@ -87,6 +88,12 @@ def initialise(params: InitParameters) -> None:
 
     model.eval()
 
+    train_x = HoleDataset(
+        square_imgs,
+        foil_hole_positions,
+        int(1.1 * diameter),
+        transform=transforms.Resize(params.input_dim[-1], antialias=True),
+    )
     evaluate_dataloader = DataLoader(train_x, batch_size=1, shuffle=False, pin_memory=True)
     latent_coords = {}
     for i, sample in enumerate(evaluate_dataloader):

@@ -71,7 +71,7 @@ def initialise(params: InitParameters) -> None:
     square_imgs = {i: Path(gs.image_path) for i, gs in enumerate(grid_squares)}
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     train_x = SquareDataset(square_imgs, transform=transforms.Resize(params.input_dim[-1], antialias=True))
-    train_dataloader = DataLoader(train_x, batch_size=params.batch_size, shuffle=True, pin_memory=True)
+    train_dataloader = DataLoader(train_x, batch_size=params.batch_size, shuffle=True, pin_memory=True, drop_last=True)
 
     torch.set_num_threads(params.num_threads)
     np.random.seed(params.seed)

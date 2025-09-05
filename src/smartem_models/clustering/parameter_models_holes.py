@@ -17,6 +17,7 @@ class InitParameters(BaseModel):
     kmeans_output_path: str = ""
     num_threads: int = 2
     num_squares: int | None = 5
+    subset_size: int | None = 2000
 
 
 class InferenceParameters(BaseModel):
