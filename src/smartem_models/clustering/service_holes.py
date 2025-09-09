@@ -13,15 +13,14 @@ from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
-from smartem_models.clustering.calldata import HoleDataset, prepare_image
+from smartem_models.clustering.calldata import HoleDataset
 from smartem_models.clustering.grid_clustering import train
 from smartem_models.clustering.models import EIAE
 from smartem_models.clustering.parameter_models_holes import InferenceParameters, InitParameters, UpdateParameters
 from smartem_models.clustering.service import _add_cluster_index, _record_dist, _record_score, _set_model_parameters
-from smartem_models.utils import read_img
 from smartem_models.utils.parameter_updating_cluster import init_distributions, score, update_distribution
 
-model_name = "dae-hole"
+model_name = "dae-holes"
 
 
 def initialise(params: InitParameters) -> None:
@@ -153,19 +152,35 @@ def infer(params: InferenceParameters):
         lat_dim=params.latent_space_dim,
     )
     model.load_state_dict(torch.load(params.model_path, weights_only=True, map_location=device))
+    model.to(device)
     model.eval()
     engine = setup_postgres_connection()
     with Session(engine) as session:
         gs = session.exec(select(GridSquare).where(GridSquare.uuid == params.uuid)).one()
         grid_uuid = gs.grid_uuid
         gridsquare_img_path = Path(gs.image_path)
-    img = transforms.Resize(params.input_dim[-1], antialias=True)(prepare_image(read_img(gridsquare_img_path)))
-    coords = model(img.unsqueeze(0))[2].detach().cpu().numpy()
+        foil_holes = session.exec(select(FoilHole).where(FoilHole.gridsquare_uuid == gs.uuid)).all()
+        foil_holes = [fh for fh in foil_holes if not fh.is_near_grid_bar]
+        diameter = foil_holes[0].diameter
+        foil_hole_positions = [[(fh.x_location, fh.y_location) for fh in foil_holes]]
+    fh_data = HoleDataset(
+        [gridsquare_img_path],
+        foil_hole_positions,
+        int(1.1 * diameter),
+        transform=transforms.Resize(params.input_dim[-1], antialias=True),
+    )
+    evaluate_dataloader = DataLoader(fh_data, batch_size=1, shuffle=False, pin_memory=True)
+    latent_coords = {}
+    for i, sample in enumerate(evaluate_dataloader):
+        coords = model.encode(Variable(sample["x1"]).to(device))[0].detach().cpu().numpy()
+        latent_coords[foil_holes[i].uuid] = coords[0]
     with open(params.kmeans_path, "rb") as pkl:
         kmeans = pickle.load(pkl)
-    cluster_index = kmeans.predict([coords])
-    _add_cluster_index(grid_uuid, cluster_index, params.uuid, coords, model=model_name)
-    return coords
+    kmeans.cluster_centers_ = kmeans.cluster_centers_.astype(np.float64)
+    for huuid, coords in latent_coords.items():
+        cluster_index = kmeans.predict(np.array([coords], dtype=np.float64))
+        _add_cluster_index(grid_uuid, cluster_index, huuid, coords, model=model_name)
+    return latent_coords
 
 
 def _get_dist(grid_uuid: str, cluster_index: int, num_steps: int = 10) -> np.array:

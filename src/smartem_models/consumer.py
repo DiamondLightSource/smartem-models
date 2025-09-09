@@ -63,7 +63,7 @@ def on_message(
         logger.warning(f"Event type {event_type} not recognised", exc_info=True)
         channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
         return
-    for hook in hooks.get(event_type):
+    for hook in hooks.get(event_type, []):
         ParameterModel = signatures.get(event_type, {}).get(hook.name).load()
         params = ParameterModel(**message, **config.get("model_parameters", {}).get(hook.name, {}).get(event_type, {}))
         if config.get("distributed", {}).get(hook.name, {}).get(event_type):

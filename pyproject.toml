@@ -51,9 +51,9 @@ escnn = ["escnn==1.0.11"]
 
 [project.entry-points."smartem_models.gridsquare.registered"]
 "resnet-holes" = "smartem_models.resnet_classifier.service_holes:infer"
-"dae-hole-init" = "smartem_models.clustering.service_holes:initialise"
-"dae-hole-infer" = "smartem_models.clustering.service_holes:infer"
-"dae-hole-update" = "smartem_models.clustering.service_holes:update"
+"dae-holes-init" = "smartem_models.clustering.service_holes:initialise"
+"dae-holes-infer" = "smartem_models.clustering.service_holes:infer"
+"dae-holes-update" = "smartem_models.clustering.service_holes:update"
 
 [project.entry-points."smartem_models.grid.registered.signature"]
 "resnet-atlas" = "smartem_models.resnet_classifier.parameter_models:InferenceParameters"
@@ -64,9 +64,9 @@ escnn = ["escnn==1.0.11"]
 
 [project.entry-points."smartem_models.gridsquare.registered.signature"]
 "resnet-holes" = "smartem_models.resnet_classifier.parameter_models:HoleInferenceParameters"
-"dae-hole-init" ="smartem_models.clustering.parameter_models_holes:InitParameters"
-"dae-hole-infer" ="smartem_models.clustering.parameter_models_holes:InferenceParameters"
-"dae-hole-update" ="smartem_models.clustering.parameter_models_holes:UpdateParameters"
+"dae-holes-init" ="smartem_models.clustering.parameter_models_holes:InitParameters"
+"dae-holes-infer" ="smartem_models.clustering.parameter_models_holes:InferenceParameters"
+"dae-holes-update" ="smartem_models.clustering.parameter_models_holes:UpdateParameters"
 
 [project.urls]
 GitHub = "https://github.com/DiamondLightSource/smartem-models"

@@ -45,3 +45,13 @@ def read_img(img_path: Path, normalise: bool = True, crop: tuple[int] | None = N
         data = data * 255
         data = data.astype("uint8")
     return data
+
+
+def read_square_img(img_path: Path) -> np.array:
+    if img_path.suffix == ".mrc":
+        data = mrcfile.read(img_path)
+    elif img_path.suffix in (".tiff", ".tif"):
+        data = tifffile.imread(img_path)
+    else:
+        raise ValueError(f"Input images must be in MRC or TIFF format. Format {img_path.suffix} unrecognised")
+    return data

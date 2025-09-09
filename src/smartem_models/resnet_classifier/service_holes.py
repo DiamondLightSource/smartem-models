@@ -10,7 +10,7 @@ from torchvision import models
 
 from smartem_models.resnet_classifier.model import Net
 from smartem_models.resnet_classifier.parameter_models import HoleInferenceParameters
-from smartem_models.utils import read_img
+from smartem_models.utils import read_square_img
 
 model_name = "resnet-holes"
 
@@ -38,7 +38,7 @@ def infer(params: HoleInferenceParameters) -> None:
         grid_square = session.exec(select(GridSquare).where(GridSquare.uuid == params.uuid)).all()[0]
         if not grid_square.image_path:
             return None
-        gs_img = read_img(Path(grid_square.image_path), normalise=False)
+        gs_img = read_square_img(Path(grid_square.image_path))
         foil_holes = session.exec(select(FoilHole).where(FoilHole.gridsquare_uuid == params.uuid)).all()
         foil_holes = [fh for fh in foil_holes if not fh.is_near_grid_bar]
         if not foil_holes:
@@ -55,6 +55,9 @@ def infer(params: HoleInferenceParameters) -> None:
             pos[1] - diameter : pos[1] + diameter,
             pos[0] - diameter : pos[0] + diameter,
         ]  # the image size is twice the hole diameter to capture the surrounding area
+        if not template.size:
+            scores[h] = 0.0
+            continue
         inputs = template.astype("float32")
         inputs = inputs - inputs.min()
         inputs = inputs / inputs.max()

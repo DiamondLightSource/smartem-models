@@ -17,14 +17,14 @@ class InitParameters(BaseModel):
     kmeans_output_path: str = ""
     num_threads: int = 2
     num_squares: int | None = 5
-    subset_size: int | None = 2000
+    subset_size: int | None = 750
 
 
 class InferenceParameters(BaseModel):
     uuid: str  # gridsquare uuid
     model_path: Path
     kmeans_path: str
-    input_dim: tuple[int, ...] = (1, 64, 64)
+    input_dim: tuple[int, ...] = (1, 32, 32)
     hidden_dims: tuple[int, ...] = (1, 16, 32, 64, 128)
     latent_space_dim: int = 2
     num_threads: int = 2
