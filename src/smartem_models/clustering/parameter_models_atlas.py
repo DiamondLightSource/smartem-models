@@ -16,3 +16,9 @@ class InitParameters(BaseModel):
     model_output_path: str = ""
     kmeans_output_path: str = ""
     num_threads: int = 2
+
+
+class UpdateParameters(BaseModel):
+    quality: float
+    micrograph_uuid: str
+    metric_name: str | None = None

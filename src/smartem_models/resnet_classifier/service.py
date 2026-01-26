@@ -11,6 +11,7 @@ from torchvision import models, transforms
 from smartem_models.resnet_classifier.dataset import GridSquarePosition, grid_square_positions
 from smartem_models.resnet_classifier.model import Net
 from smartem_models.resnet_classifier.parameter_models import InferenceParameters
+from smartem_models.utils import publish_with_retry
 
 model_name = "resnet-atlas"
 
@@ -107,9 +108,12 @@ def infer(params: InferenceParameters) -> None:
             score += 0.5 * ((predicted * confidence)[0] + 1)
 
         score /= len(pos)
-        scores[s] = score * (1 if _boundary_check(s) else 0)
+        scores[s] = score  # * (1 if _boundary_check(s) else 0)
 
+    print(len(scores))
     for k, v in scores.items():
-        publish_gridsquare_model_prediction(gridsquare_uuid=k, model_name=model_name, prediction_value=v)
+        publish_with_retry(
+            publish_gridsquare_model_prediction, gridsquare_uuid=k, model_name=model_name, prediction_value=v
+        )
 
     return None

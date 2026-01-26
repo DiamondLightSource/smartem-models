@@ -47,13 +47,23 @@ escnn = ["escnn==1.0.11"]
 "dae-atlas" = "smartem_models.clustering.service_atlas:initialise"
 "dae-square-init" = "smartem_models.clustering.service:initialise"
 "dae-square-infer" = "smartem_models.clustering.service:infer"
-"dae-square-update" = "smartem_models.clustering.service:update"
 
 [project.entry-points."smartem_models.gridsquare.registered"]
 "resnet-holes" = "smartem_models.resnet_classifier.service_holes:infer"
 "dae-hole-init" = "smartem_models.clustering.service_holes:initialise"
 "dae-hole-infer" = "smartem_models.clustering.service_holes:infer"
+
+[project.entry-points."smartem_models.motion_correction.registered"]
 "dae-hole-update" = "smartem_models.clustering.service_holes:update"
+"dae-atlas-update" = "smartem_models.clustering.service_atlas:update"
+
+[project.entry-points."smartem_models.ctf.registered"]
+"dae-hole-update" = "smartem_models.clustering.service_holes:update"
+"dae-atlas-update" = "smartem_models.clustering.service_atlas:update"
+
+[project.entry-points."smartem_models.particle_picking.registered"]
+"dae-hole-update" = "smartem_models.clustering.service_holes:update"
+"dae-atlas-update" = "smartem_models.clustering.service_atlas:update"
 
 [project.entry-points."smartem_models.grid.registered.signature"]
 "resnet-atlas" = "smartem_models.resnet_classifier.parameter_models:InferenceParameters"
@@ -66,7 +76,18 @@ escnn = ["escnn==1.0.11"]
 "resnet-holes" = "smartem_models.resnet_classifier.parameter_models:HoleInferenceParameters"
 "dae-hole-init" ="smartem_models.clustering.parameter_models_holes:InitParameters"
 "dae-hole-infer" ="smartem_models.clustering.parameter_models_holes:InferenceParameters"
+
+[project.entry-points."smartem_models.motion_correction.registered.signature"]
 "dae-hole-update" ="smartem_models.clustering.parameter_models_holes:UpdateParameters"
+"dae-atlas-update" ="smartem_models.clustering.parameter_models_atlas:UpdateParameters"
+
+[project.entry-points."smartem_models.ctf.registered.signature"]
+"dae-hole-update" ="smartem_models.clustering.parameter_models_holes:UpdateParameters"
+"dae-atlas-update" ="smartem_models.clustering.parameter_models_atlas:UpdateParameters"
+
+[project.entry-points."smartem_models.particle_picking.registered.signature"]
+"dae-hole-update" ="smartem_models.clustering.parameter_models_holes:UpdateParameters"
+"dae-atlas-update" ="smartem_models.clustering.parameter_models_atlas:UpdateParameters"
 
 [project.urls]
 GitHub = "https://github.com/DiamondLightSource/smartem-models"

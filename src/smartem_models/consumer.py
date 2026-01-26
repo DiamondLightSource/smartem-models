@@ -8,11 +8,13 @@ from pika.frame import Body, Method
 from pika.spec import BasicProperties
 from pydantic import BaseModel
 from smartem_backend.model.mq_event import MessageQueueEventType
-from smartem_backend.utils import setup_rabbitmq
+from smartem_backend.utils import setup_postgres_connection, setup_rabbitmq
 
 from smartem_models.utils import get_config
 
 logger = getLogger("smartem_models.consumer")
+
+engine = setup_postgres_connection()
 
 
 def publish_request(
@@ -62,17 +64,18 @@ def on_message(
         logger.warning(f"Event type {event_type} not recognised", exc_info=True)
         channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
         return
-    for hook in hooks.get(event_type):
+
+    for hook in hooks.get(event_type, []):
         ParameterModel = signatures.get(event_type, {}).get(hook.name).load()
-        params = ParameterModel(**message, **config.get("model_parameters", {}).get(hook.name, {}).get(event_type, ""))
+        params = ParameterModel(**message, **config.get("model_parameters", {}).get(hook.name, {}).get(event_type, {}))
         if config.get("distributed", {}).get(hook.name, {}).get(event_type):
             requested_counts: list[int] | None
             if (requested_counts := config.get("act_on_count", {}).get(hook.name, {}).get(event_type)) is not None:
                 if count_functions[event_type](message) not in requested_counts:
-                    break
+                    continue
             if (minimum_count := config.get("minimum_count", {}).get(hook.name, {}).get(event_type)) is not None:
                 if count_functions[event_type](message) < minimum_count:
-                    break
+                    continue
             try:
                 publish_request(
                     config.get("processing_queues", {}).get(hook.name, {}).get(event_type, ""),
@@ -80,8 +83,10 @@ def on_message(
                     params,
                 )
             except ValueError:
-                channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-                return
+                logger.warning(f"Failed to publish request for {hook.name}")
+                # channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+                # return
+                continue
         else:
             hook.load()(params)
 
@@ -96,8 +101,11 @@ def run():
         for k, v in entry_points().items()
         if k.startswith("smartem_models") and not k.endswith("signature")
     }
+    registered_models = config.get("registered_models", [])
+    for k, v in eps.items():
+        eps[k] = [w for w in v if w.name in registered_models]
     signatures = {
-        k.replace("smartem_models.", ""): v
+        k.replace("smartem_models.", "").replace(".signature", ""): v
         for k, v in entry_points().items()
         if k.startswith("smartem_models") and k.endswith("signature")
     }

@@ -31,7 +31,7 @@ class InferenceParameters(BaseModel):
 
 
 class UpdateParameters(BaseModel):
-    quality: bool
+    quality: float
     cluster_index: int
     grid_uuid: str
     gridsquare_uuid: str

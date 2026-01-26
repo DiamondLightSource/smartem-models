@@ -12,7 +12,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from smartem_models.utils import read_img
+from smartem_models.utils import read_img, read_square_img
 
 
 def atoi(text):
@@ -27,14 +27,24 @@ def prepare_image(im: np.array) -> torch.Tensor:
 
 class HoleDataset(Dataset):
     def __init__(
-        self, grid_square_imgs: list[Path], foil_hole_positions: list[list[tuple[int, int]]], diameter, transform=None
+        self,
+        grid_square_imgs: list[Path],
+        foil_hole_positions: list[list[tuple[int, int]]],
+        diameter,
+        transform=None,
+        subset: bool = True,
     ):
         self.img_positions = []
         for gs in foil_hole_positions:
             self.img_positions.extend(gs)
+
+        if len(self.img_positions) > 300 and subset:
+            chosen_indices = np.random.choice(range(len(self.img_positions)), size=300)
+            self.img_positions = [p for i, p in enumerate(self.img_positions) if i in chosen_indices]
+
         self.labels = range(len(self.img_positions))
-        self.imgs = [read_img(p) for p in grid_square_imgs]
-        print(len(grid_square_imgs), len(foil_hole_positions))
+
+        self.imgs = [read_square_img(p) for p in grid_square_imgs]
         self.index_map = []
         for i, gs in enumerate(foil_hole_positions):
             self.index_map.extend([i for _ in gs])

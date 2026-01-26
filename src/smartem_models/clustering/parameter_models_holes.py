@@ -22,15 +22,14 @@ class InitParameters(BaseModel):
 class InferenceParameters(BaseModel):
     uuid: str  # gridsquare uuid
     model_path: Path
-    kmeans_path: str
-    input_dim: tuple[int, ...] = (1, 64, 64)
+    kmeans_path: Path
+    input_dim: tuple[int, ...] = (1, 32, 32)
     hidden_dims: tuple[int, ...] = (1, 16, 32, 64, 128)
     latent_space_dim: int = 2
     num_threads: int = 2
 
 
 class UpdateParameters(BaseModel):
-    quality: bool
-    cluster_index: int
-    grid_uuid: str
-    foilhole_uuid: str
+    quality: float
+    micrograph_uuid: str
+    metric_name: str | None = None

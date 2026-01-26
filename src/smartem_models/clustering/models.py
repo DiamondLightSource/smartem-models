@@ -325,7 +325,7 @@ class EIAE(nn.Module):
         diff = torch.abs(z - z.unsqueeze(axis=1))
         none_zeros = torch.where(diff == 0.0, torch.tensor([100.0]).to(z.device), diff)
         z_scores, _ = torch.min(none_zeros, axis=1)
-        std = torch.normal(mean=0.0, std=1.0 * z_scores).to(z.device)
+        std = torch.normal(mean=0.0, std=1.0 * torch.nan_to_num(z_scores, nan=1e-5)).to(z.device)
         s = z + std
         c = torch.cat((torch.cos(2 * np.pi * s), torch.sin(2 * np.pi * s)), 0)
         c = c.T.reshape(self.latent_dim * 2, -1).T

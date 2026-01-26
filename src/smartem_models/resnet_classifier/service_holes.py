@@ -1,6 +1,8 @@
 from pathlib import Path
 
+import mrcfile
 import numpy as np
+import tifffile
 import torch
 from smartem_backend.model.database import FoilHole, GridSquare
 from smartem_backend.mq_publisher import publish_foilhole_model_prediction
@@ -10,7 +12,7 @@ from torchvision import models
 
 from smartem_models.resnet_classifier.model import Net
 from smartem_models.resnet_classifier.parameter_models import HoleInferenceParameters
-from smartem_models.utils import read_img
+from smartem_models.utils import publish_with_retry
 
 model_name = "resnet-holes"
 
@@ -38,27 +40,39 @@ def infer(params: HoleInferenceParameters) -> None:
         grid_square = session.exec(select(GridSquare).where(GridSquare.uuid == params.uuid)).all()[0]
         if not grid_square.image_path:
             return None
-        gs_img = read_img(Path(grid_square.image_path), normalise=False)
+        if Path(grid_square.image_path).suffix == ".mrc":
+            gs_img = mrcfile.read(Path(grid_square.image_path))
+        else:
+            gs_img = tifffile.imread(Path(grid_square.image_path))
         foil_holes = session.exec(select(FoilHole).where(FoilHole.gridsquare_uuid == params.uuid)).all()
         foil_holes = [fh for fh in foil_holes if not fh.is_near_grid_bar]
         if not foil_holes:
             return None
         diameter = foil_holes[0].diameter
-        foil_hole_positions = {fh.uuid: (fh.x_location, fh.y_location) for fh in foil_holes}
+        foil_hole_positions = {
+            fh.uuid: (fh.x_location, fh.y_location) for fh in foil_holes if fh.x_location is not None
+        }
 
     img_transform = models.ResNet18_Weights.IMAGENET1K_V1.transforms()
+
+    if diameter is None:
+        return None
 
     scores = {}
     for h, pos in foil_hole_positions.items():
         score: float = 0
         template = gs_img[
-            pos[1] - diameter : pos[1] + diameter,
-            pos[0] - diameter : pos[0] + diameter,
+            pos[1] - diameter : pos[1] + diameter, pos[0] - diameter : pos[0] + diameter
         ]  # the image size is twice the hole diameter to capture the surrounding area
-        inputs = template.astype("float32")
+        if not template.size:
+            scores[h] = 0
+            continue
+        # inputs = template.astype("float32")
+        inputs = template
         inputs = inputs - inputs.min()
         inputs = inputs / inputs.max()
         inputs = np.clip(inputs.astype(np.float32), 0.0, 1.0)
+
         inputs = np.expand_dims(inputs, axis=0)
         inputs = np.repeat(inputs, 3, axis=0)
         tmp = torch.from_numpy(inputs)
@@ -75,6 +89,11 @@ def infer(params: HoleInferenceParameters) -> None:
         scores[h] = score
 
     for k, v in scores.items():
-        publish_foilhole_model_prediction(foilhole_uuid=k, model_name=model_name, prediction_value=v)
+        publish_with_retry(
+            publish_foilhole_model_prediction, foilhole_uuid=k, model_name=model_name, prediction_value=v
+        )
+
+    if params.update_latent_reps:
+        pass
 
     return None

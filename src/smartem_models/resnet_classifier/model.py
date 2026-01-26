@@ -38,6 +38,12 @@ class Net(torch.nn.Module):
 
     def update_embeddings(self, x, y):
         self.N = self.gamma * self.N + (1 - self.gamma) * y.sum(0)
+        z = self.feature_extractor(x)
+
+        z = torch.einsum("ij,mnj->imn", z, self.W)
+        embedding_sum = torch.einsum("ijk,ik->jk", z, y)
+
+        self.m = self.gamma * self.m + (1 - self.gamma) * embedding_sum
 
     def forward(self, x):
         features = self.feature_extractor(x)

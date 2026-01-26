@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from sklearn.cluster import KMeans
-from smartem_backend.model.database import GridSquare, QualityPredictionModelParameter
+from smartem_backend.model.database import GridSquare, QualityMetric, QualityPredictionModelParameter
 from smartem_backend.mq_publisher import publish_gridsquare_model_prediction, publish_model_parameter_update
 from smartem_backend.utils import setup_postgres_connection
 from sqlmodel import Session, and_, func, select
@@ -17,7 +17,7 @@ from smartem_models.clustering.grid_clustering import train
 from smartem_models.clustering.models import EIAE
 from smartem_models.clustering.parameter_models import InferenceParameters, InitParameters, UpdateParameters
 from smartem_models.utils import read_img
-from smartem_models.utils.parameter_updating_cluster import init_distributions, score, update_distribution
+from smartem_models.utils.parameter_updating_cluster import init_distributions, score, update_distribution_from_prob
 
 model_name = "dae-square"
 
@@ -28,15 +28,21 @@ def _set_model_parameters(
     grid_uuid: str,
     model: str = model_name,
 ) -> None:
+    # need the distribution to have a metric_name (all metric names)
+    engine = setup_postgres_connection()
+    with Session(engine) as session:
+        metric_names = [m.name for m in session.exec(select(QualityMetric)).all()]
     for i, d in enumerate(dists):
         for j in range(len(d)):
-            publish_model_parameter_update(
-                grid_uuid=grid_uuid,
-                model_name=model,
-                key=str(j),
-                value=float(d[j]),
-                group=f"dist:{i}",
-            )
+            for mn in metric_names:
+                publish_model_parameter_update(
+                    grid_uuid=grid_uuid,
+                    model_name=model,
+                    key=str(j),
+                    value=float(d[j]),
+                    metric=mn,
+                    group=f"dist:{i}",
+                )
     for c in coords:
         publish_model_parameter_update(
             grid_uuid=grid_uuid,
@@ -71,7 +77,7 @@ def initialise(params: InitParameters) -> None:
     square_imgs = {i: Path(gs.image_path) for i, gs in enumerate(grid_squares)}
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     train_x = SquareDataset(square_imgs, transform=transforms.Resize(params.input_dim[-1], antialias=True))
-    train_dataloader = DataLoader(train_x, batch_size=params.batch_size, shuffle=True, pin_memory=True)
+    train_dataloader = DataLoader(train_x, shuffle=True, pin_memory=True, drop_last=True)
 
     torch.set_num_threads(params.num_threads)
     np.random.seed(params.seed)
@@ -221,7 +227,9 @@ def _get_dist(grid_uuid: str, cluster_index: int, num_steps: int = 10) -> np.arr
     return dist
 
 
-def _record_dist(dist: np.array, grid_uuid: str, cluster_index: int, model: str = model_name) -> None:
+def _record_dist(
+    dist: np.array, grid_uuid: str, cluster_index: int, metric_name: str | None = None, model: str = model_name
+) -> None:
     if np.sum(dist) == 0:
         return None
     for j in range(len(dist)):
@@ -231,22 +239,24 @@ def _record_dist(dist: np.array, grid_uuid: str, cluster_index: int, model: str 
             key=str(j),
             group=f"dist:{cluster_index}",
             value=dist[j],
+            metric=metric_name,
         )
     return None
 
 
-def _record_score(score: float, gridsquare_uuid: str, model: str = model_name) -> None:
+def _record_score(score: float, gridsquare_uuid: str, metric_name: str | None = None, model: str = model_name) -> None:
     publish_gridsquare_model_prediction(
         gridsquare_uuid=gridsquare_uuid,
         model_name=model,
         prediction_value=score,
+        metric=metric_name,
     )
     return None
 
 
 def update(params: UpdateParameters) -> None:
     dist = _get_dist(params.grid_uuid, params.cluster_index)
-    dist = update_distribution(dist, params.quality)
+    dist = update_distribution_from_prob(dist, params.quality)
     _record_dist(dist, params.grid_uuid, params.cluster_index)
     post_update_score = score(dist, params.cluster_index)
     _record_score(post_update_score, params.gridsquare_uuid)

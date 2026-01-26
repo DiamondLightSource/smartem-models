@@ -25,6 +25,17 @@ def update_distribution(dist: np.array, quality: bool) -> np.array:
     return dist
 
 
+def update_distribution_from_prob(dist: np.array, quality: float) -> np.array:
+    step = 1 / len(dist)
+    midpoints = np.arange(step, 1 + step, step)
+    probs = np.array([p * quality + (1 - p) * (1 - quality) for p in midpoints])
+    probs[probs < 1e-4] = 1e-4
+    update_unnormalised = dist * probs * step
+    update = update_unnormalised / np.sum(update_unnormalised)
+    dist = update / step
+    return dist
+
+
 def score(dist: np.array, index: int) -> float:
     bin_dist = dist[index]
     step = 1 / len(bin_dist)

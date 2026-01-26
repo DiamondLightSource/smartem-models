@@ -1,4 +1,4 @@
-ARG PYTHON_VERSION=3.12.11
+ARG PYTHON_VERSION=3.12
 FROM python:${PYTHON_VERSION} AS developer
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
@@ -18,8 +18,8 @@ COPY ./smartem-decisions ./smartem-decisions
 WORKDIR /app/smartem-models
 # Install the package using pyproject.toml and setup.py
 # This will also handle copying _version.py files and .env.example → .env
-RUN uv sync --extra torchgpu --extra escnn
-RUN uv pip install --no-cache "../smartem-decisions[backend]" uvicorn pyyaml 
+RUN uv sync --locked --extra torchcpu --extra escnn
+RUN uv pip install --no-cache "../smartem-decisions[backend]" uvicorn
 
 # The runtime stage copies the built venv into a slim runtime container
 FROM python:${PYTHON_VERSION}-slim AS runtime
