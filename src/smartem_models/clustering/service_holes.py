@@ -1,4 +1,5 @@
 import pickle
+import uuid
 from pathlib import Path
 
 import numpy as np
@@ -11,7 +12,11 @@ from smartem_backend.model.database import (
     QualityMetric,
     QualityPredictionModelParameter,
 )
-from smartem_backend.mq_publisher import publish_gridsquare_registered, publish_multi_foilhole_model_prediction
+from smartem_backend.mq_publisher import (
+    publish_create_foilhole_group,
+    publish_foilhole_group_model_prediction,
+    publish_gridsquare_registered,
+)
 from smartem_backend.utils import setup_postgres_connection
 from smartem_common.entity_status import GridSquareStatus
 from sqlmodel import Session, select
@@ -27,6 +32,10 @@ from smartem_models.clustering.service import _add_cluster_index, _set_model_par
 from smartem_models.utils.parameter_updating_cluster import init_distributions, update_distribution_from_prob
 
 model_name = "dae-hole"
+
+
+def _cluster_group_uuid(grid_uuid: str, cluster_index: int) -> str:
+    return str(uuid.uuid5(uuid.UUID(grid_uuid), f"{model_name}:cluster:{cluster_index}"))
 
 
 def initialise(params: InitParameters) -> None:
@@ -127,6 +136,18 @@ def initialise(params: InitParameters) -> None:
         with open(params.kmeans_output_path, "wb") as pkl:
             pickle.dump(kmeans, pkl)
 
+    # Create foil hole groups (one per cluster)
+    cluster_holes: dict[int, list[str]] = {}
+    for lc in labelled_coords:
+        cluster_holes.setdefault(int(lc[2]), []).append(lc[0])
+
+    for cluster_idx, hole_uuids in cluster_holes.items():
+        publish_create_foilhole_group(
+            grid_uuid=grid_uuid,
+            foilhole_uuids=hole_uuids,
+            group_uuid=_cluster_group_uuid(grid_uuid, cluster_idx),
+        )
+
     # after writing files used in inference check for grid squares that need to have inference run
     with Session(engine) as session:
         registered_grid_squares = session.exec(
@@ -153,9 +174,15 @@ def initialise(params: InitParameters) -> None:
 
     with Session(engine) as session:
         metric_names = [m.name for m in session.exec(select(QualityMetric)).all()]
-    for lc in labelled_coords:
+    for cluster_idx, score_val in enumerate(post_update_scores):
+        group_uuid = _cluster_group_uuid(grid_uuid, cluster_idx)
         for metric_name in metric_names:
-            _record_score(post_update_scores[lc[2]], [lc[0]], metric_name=metric_name, model=model_name)
+            publish_foilhole_group_model_prediction(
+                group_uuid=group_uuid,
+                model_name=model_name,
+                prediction_value=score_val,
+                metric=metric_name,
+            )
 
     return None
 
@@ -206,16 +233,28 @@ def infer(params: InferenceParameters):
     with open(params.kmeans_path, "rb") as pkl:
         kmeans = pickle.load(pkl)
     kmeans.cluster_centers_ = kmeans.cluster_centers_.astype(np.float64)
+    cluster_holes: dict[int, list[str]] = {}
     for huuid, coords in latent_coords.items():
-        cluster_index = kmeans.predict(np.array([coords], dtype=np.float64))
+        cluster_index = int(kmeans.predict(np.array([coords], dtype=np.float64))[0])
         _add_cluster_index(grid_uuid, cluster_index, huuid, coords, model=model_name)
+        cluster_holes.setdefault(cluster_index, []).append(huuid)
 
     with Session(engine) as session:
         metric_names = [m.name for m in session.exec(select(QualityMetric)).all()]
-    for fhuuid in latent_coords.keys():
+    for cluster_idx, hole_uuids in cluster_holes.items():
+        publish_create_foilhole_group(
+            grid_uuid=grid_uuid,
+            foilhole_uuids=hole_uuids,
+            group_uuid=_cluster_group_uuid(grid_uuid, cluster_idx),
+        )
         for metric_name in metric_names:
-            dist = _get_dist(grid_uuid, cluster_index, metric_name)
-            _record_score(_score(dist), [fhuuid], metric_name=metric_name, model=model_name)
+            dist = _get_dist(grid_uuid, cluster_idx, metric_name)
+            publish_foilhole_group_model_prediction(
+                group_uuid=_cluster_group_uuid(grid_uuid, cluster_idx),
+                model_name=model_name,
+                prediction_value=_score(dist),
+                metric=metric_name,
+            )
 
     return coords
 
@@ -249,18 +288,6 @@ def _score(dist):
     return np.sum(step * midpoints * dist)
 
 
-def _record_score(
-    score: float, foilhole_uuids: list[str], metric_name: str | None = None, model: str = model_name
-) -> None:
-    publish_multi_foilhole_model_prediction(
-        foilhole_uuids=foilhole_uuids,
-        model_name=model,
-        prediction_value=score,
-        metric=metric_name,
-    )
-    return None
-
-
 def update(params: UpdateParameters) -> None:
     engine = setup_postgres_connection()
     with Session(engine) as session:
@@ -281,17 +308,6 @@ def update(params: UpdateParameters) -> None:
         if not cluster_index_response:
             return None
         cluster_index = int(cluster_index_response[0].value)
-        foil_holes = {
-            p.key
-            for p in session.exec(
-                select(QualityPredictionModelParameter)
-                .where(QualityPredictionModelParameter.grid_uuid == micrograph_chain[0].grid_uuid)
-                .where(QualityPredictionModelParameter.group == "cluster_indices")
-                .where(QualityPredictionModelParameter.value == cluster_index)
-                .where(QualityPredictionModelParameter.prediction_model_name == model_name)
-                .order_by(QualityPredictionModelParameter.timestamp.desc())
-            ).all()
-        }
 
     dist = _get_dist(micrograph_chain[0].grid_uuid, cluster_index, metric_name=params.metric_name)
     dist = update_distribution_from_prob(dist, params.quality)
@@ -310,6 +326,10 @@ def update(params: UpdateParameters) -> None:
             )
         session.commit()
 
-    post_update_score = _score(dist)
-    _record_score(post_update_score, list(foil_holes), metric_name=params.metric_name, model=model_name)
+    publish_foilhole_group_model_prediction(
+        group_uuid=_cluster_group_uuid(micrograph_chain[0].grid_uuid, cluster_index),
+        model_name=model_name,
+        prediction_value=_score(dist),
+        metric=params.metric_name,
+    )
     return None
