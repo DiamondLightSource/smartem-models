@@ -45,6 +45,8 @@ def initialise(params: InitParameters) -> None:
     diameter: int | None = None
     with Session(engine) as session:
         for gs in grid_squares:
+            if gs.image_path is None:
+                continue
             square_imgs.append(Path(gs.image_path))
             foil_holes = session.exec(select(FoilHole).where(FoilHole.gridsquare_uuid == gs.uuid)).all()
             foil_holes = [fh for fh in foil_holes if not fh.is_near_grid_bar]
