@@ -20,6 +20,7 @@ WORKDIR /app/smartem-models
 # This will also handle copying _version.py files and .env.example → .env
 RUN uv sync --extra torchgpu --extra escnn
 RUN uv pip install --no-cache "../smartem-decisions[backend]" uvicorn pyyaml 
+RUN uv pip install "numpy<2"
 
 # The runtime stage copies the built venv into a slim runtime container
 FROM python:${PYTHON_VERSION}-slim AS runtime

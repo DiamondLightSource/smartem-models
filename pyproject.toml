@@ -112,6 +112,7 @@ conflicts = [
     { extra = "torchgpu" },
   ],
 ]
+override-dependencies = ["numpy<2"]
 
 [tool.uv.sources]
 torch = [
