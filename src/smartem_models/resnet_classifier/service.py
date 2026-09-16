@@ -1,9 +1,15 @@
+import asyncio
 from pathlib import Path
 
 import numpy as np
 import torch
-from smartem_backend.model.database import Grid
-from smartem_backend.mq_publisher import publish_gridsquare_model_prediction
+from smartem_backend import mq_publisher as mq_publisher_module
+from smartem_backend.model.database import Atlas, Grid
+from smartem_backend.mq_publisher import publish_atlas_model_prediction, publish_gridsquare_model_prediction
+from smartem_backend.rmq import AioPikaPublisher
+
+# from smartem_models.utils import publish_with_retry
+from smartem_backend.rmq.config import load_rmq_connection_url
 from smartem_backend.utils import setup_postgres_connection
 from sqlmodel import Session, select
 from torchvision import models, transforms
@@ -11,12 +17,11 @@ from torchvision import models, transforms
 from smartem_models.resnet_classifier.dataset import GridSquarePosition, grid_square_positions
 from smartem_models.resnet_classifier.model import Net
 from smartem_models.resnet_classifier.parameter_models import InferenceParameters
-from smartem_models.utils import publish_with_retry
 
 model_name = "resnet-atlas"
 
 
-def infer(params: InferenceParameters) -> None:
+async def infer(params: InferenceParameters) -> None:
     torch.set_num_threads(params.cpus)
     feature_extractor = models.resnet18(pretrained=False)
     feature_extractor.conv1 = torch.nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
@@ -36,14 +41,18 @@ def infer(params: InferenceParameters) -> None:
     engine = setup_postgres_connection()
     with Session(engine) as session:
         grid = session.exec(select(Grid).where(Grid.uuid == params.grid_uuid)).one()
-    if params.use_single_image:
+        atlas = session.exec(select(Atlas).where(Atlas.grid_uuid == params.grid_uuid)).all()[0]
+    if params.use_single_image or "Sample" not in grid.atlas_dir:
         gs_positions = grid_square_positions(
             params.grid_uuid,
-            str(Path(grid.atlas_dir).parent),
-            montage_name=Path(grid.atlas_dir).name,
+            grid.atlas_dir,
+            montage_name=f"{grid.name}_montage.mrc",
         )
     else:
         gs_positions = grid_square_positions(params.grid_uuid, str(Path(grid.atlas_dir).parent))
+
+    if not gs_positions:
+        return None
 
     boundaries = (
         (
@@ -91,7 +100,60 @@ def infer(params: InferenceParameters) -> None:
         ]
     )
 
+    scores = await asyncio.to_thread(run_inference, gs_positions, model, img_transform)
+
+    publisher = AioPikaPublisher(
+        url=load_rmq_connection_url(),
+        exchange_name="smartem",
+        routing_key="smartem",
+    )
+    await publisher.connect()
+    mq_publisher_module.set_publisher(publisher)
+
+    for k, v in scores.items():
+        await publish_gridsquare_model_prediction(gridsquare_uuid=k, model_name=model_name, prediction_value=v)
+    await publish_atlas_model_prediction(atlas.uuid, float(np.mean(list(scores.values()))), model_name=model_name)
+    await publisher.close()
+
+    return None
+
+
+def _boundary_check(gs_positions, boundaries, gs_name: str) -> tuple[bool, bool, bool, bool]:
+    loc = gs_positions[gs_name][0].center_on_atlas
+    brange = (
+        boundaries[0][1] - boundaries[0][0],
+        boundaries[1][1] - boundaries[1][0],
+    )
+    thresholds = (
+        (
+            boundaries[0][0] + 0.075 * brange[0],
+            boundaries[0][1] - 0.075 * brange[0],
+        ),
+        (
+            boundaries[1][0] + 0.075 * brange[1],
+            boundaries[1][1] - 0.075 * brange[1],
+        ),
+    )
+    return (
+        loc[0] > thresholds[0][0]
+        and loc[0] < thresholds[0][1]
+        and loc[1] > thresholds[1][0]
+        and loc[1] < thresholds[1][1]
+    )
+
+
+def run_inference(gs_positions, model, img_transform):
     scores = {}
+    boundaries = (
+        (
+            np.min([pos[0].center_on_atlas[0] for pos in gs_positions.values()]),
+            np.max([pos[0].center_on_atlas[0] for pos in gs_positions.values()]),
+        ),
+        (
+            np.min([pos[0].center_on_atlas[1] for pos in gs_positions.values()]),
+            np.max([pos[0].center_on_atlas[1] for pos in gs_positions.values()]),
+        ),
+    )
     for s, pos in gs_positions.items():
         score: float = 0
         images = [p.image for p in pos]
@@ -115,12 +177,5 @@ def infer(params: InferenceParameters) -> None:
             score += 0.5 * ((predicted * confidence)[0] + 1)
 
         score /= len(pos)
-        scores[s] = score  # * (1 if _boundary_check(s) else 0)
-
-    print(len(scores))
-    for k, v in scores.items():
-        publish_with_retry(
-            publish_gridsquare_model_prediction, gridsquare_uuid=k, model_name=model_name, prediction_value=v
-        )
-
-    return None
+        scores[s] = score * (1 if _boundary_check(gs_positions, boundaries, s) else 0.5)
+    return scores
