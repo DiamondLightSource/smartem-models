@@ -46,7 +46,7 @@ def grid_square_positions(
 ) -> dict[str, list[GridSquarePosition]]:
     engine = setup_postgres_connection()
     with Session(engine) as session:
-        if montage_name:
+        if not montage_name:
             positions = session.exec(
                 select(Atlas, AtlasTile, AtlasTileGridSquarePosition, GridSquare)
                 .where(Atlas.grid_uuid == grid_uuid)
@@ -55,12 +55,12 @@ def grid_square_positions(
                 .where(AtlasTileGridSquarePosition.gridsquare_uuid == GridSquare.uuid)
             ).all()
         else:
-            positions = session.exec(select(Atlas, GridSquare).where(Atlas.grid_uuid == grid_uuid)).all()
+            positions = session.exec(select(GridSquare).where(GridSquare.grid_uuid == grid_uuid)).all()
 
     gs_imgs: dict[str, list[Image.Image]] = {}
 
-    for pos in positions:
-        if montage_name:
+    if not montage_name:
+        for pos in positions:
             d = (
                 pos[2].center_x - pos[2].size_width // 2,
                 pos[2].center_y - pos[2].size_height // 2,
@@ -81,26 +81,43 @@ def grid_square_positions(
                         center_on_atlas=(pos[3].center_x, pos[3].center_y),
                     )
                 )
-        else:
+    else:
+        try:
+            data = mrcfile.read(Path(atlas_dir) / montage_name)
+            mean = np.mean(data)
+            sdev = np.std(data)
+            sigma_min = mean - 3 * sdev
+            sigma_max = mean + 3 * sdev
+            data = np.ndarray.copy(data)
+            data[data < sigma_min] = sigma_min
+            data[data > sigma_max] = sigma_max
+            data = data - data.min()
+            data = data / data.max()
+            data = data * 255
+            array = data.astype("uint8")
+            atlas_img = Image.fromarray(array)
+        except FileNotFoundError:
+            return {}
+
+        for pos in positions:
             d = (
-                pos[1].center_x - pos[1].size_width // 2,
-                pos[1].center_y - pos[1].size_height // 2,
-                pos[1].center_x + pos[1].size_width // 2,
-                pos[1].center_y + pos[1].size_height // 2,
+                pos.center_x - pos.size_width // 2,
+                pos.center_y - pos.size_height // 2,
+                pos.center_x + pos.size_width // 2,
+                pos.center_y + pos.size_height // 2,
             )
-            atlas_img = mrcfile.read(Path(atlas_dir) / montage_name)
-            if gs_imgs.get(pos[1].uuid) is None:
-                gs_imgs[pos[1].uuid] = [
+            if gs_imgs.get(pos.uuid) is None:
+                gs_imgs[pos.uuid] = [
                     GridSquarePosition(
                         image=atlas_img.crop(d),
-                        center_on_atlas=(pos[1].center_x, pos[1].center_y),
+                        center_on_atlas=(pos.center_x, pos.center_y),
                     )
                 ]
             else:
-                gs_imgs[pos[1].uuid].append(
+                gs_imgs[pos.uuid].append(
                     GridSquarePosition(
                         image=atlas_img.crop(d),
-                        center_on_atlas=(pos[1].center_x, pos[1].center_y),
+                        center_on_atlas=(pos.center_x, pos.center_y),
                     )
                 )
 
