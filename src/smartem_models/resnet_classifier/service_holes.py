@@ -4,20 +4,22 @@ import mrcfile
 import numpy as np
 import tifffile
 import torch
+from smartem_backend import mq_publisher as mq_publisher_module
 from smartem_backend.model.database import FoilHole, GridSquare
-from smartem_backend.mq_publisher import publish_foilhole_model_prediction
+from smartem_backend.mq_publisher import publish_foilhole_model_prediction, publish_gridsquare_updated
+from smartem_backend.rmq import AioPikaPublisher
+from smartem_backend.rmq.config import load_rmq_connection_url
 from smartem_backend.utils import setup_postgres_connection
 from sqlmodel import Session, select
 from torchvision import models
 
 from smartem_models.resnet_classifier.model import Net
 from smartem_models.resnet_classifier.parameter_models import HoleInferenceParameters
-from smartem_models.utils import publish_with_retry
 
 model_name = "resnet-holes"
 
 
-def infer(params: HoleInferenceParameters) -> None:
+async def infer(params: HoleInferenceParameters) -> None:
     torch.set_num_threads(params.cpus)
     feature_extractor = models.resnet18(pretrained=False)
     feature_extractor.conv1 = torch.nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
@@ -40,10 +42,16 @@ def infer(params: HoleInferenceParameters) -> None:
         grid_square = session.exec(select(GridSquare).where(GridSquare.uuid == params.uuid)).all()[0]
         if not grid_square.image_path:
             return None
-        if Path(grid_square.image_path).suffix == ".mrc":
-            gs_img = mrcfile.read(Path(grid_square.image_path))
-        else:
-            gs_img = tifffile.imread(Path(grid_square.image_path))
+        try:
+            if Path(grid_square.image_path).suffix == ".mrc":
+                gs_img = mrcfile.read(Path(grid_square.image_path))
+            else:
+                gs_img = tifffile.imread(Path(grid_square.image_path))
+        except FileNotFoundError:
+            if Path(grid_square.image_path).suffix == ".mrc":
+                gs_img = tifffile.imread(Path(grid_square.image_path).with_suffix(".tiff"))
+            elif Path(grid_square.image_path) in (".tiff", ".tif"):
+                gs_img = mrcfile.read(Path(grid_square.image_path).with_suffix(".mrc"))
         foil_holes = session.exec(select(FoilHole).where(FoilHole.gridsquare_uuid == params.uuid)).all()
         foil_holes = [fh for fh in foil_holes if not fh.is_near_grid_bar]
         if not foil_holes:
@@ -88,12 +96,23 @@ def infer(params: HoleInferenceParameters) -> None:
 
         scores[h] = score
 
-    for k, v in scores.items():
-        publish_with_retry(
-            publish_foilhole_model_prediction, foilhole_uuid=k, model_name=model_name, prediction_value=v
+    publisher = AioPikaPublisher(
+        url=load_rmq_connection_url(),
+        exchange_name="smartem",
+        routing_key="smartem",
+    )
+    await publisher.connect()
+    mq_publisher_module.set_publisher(publisher)
+
+    try:
+        for k, v in scores.items():
+            await publish_foilhole_model_prediction(foilhole_uuid=k, model_name=model_name, prediction_value=v)
+
+        _ = await publish_gridsquare_updated(
+            uuid=grid_square.uuid, grid_uuid=grid_square.grid_uuid, gridsquare_id=grid_square.gridsquare_id
         )
 
-    if params.update_latent_reps:
-        pass
+    finally:
+        await publisher.close()
 
     return None
