@@ -1,3 +1,4 @@
+import asyncio
 import pickle
 import uuid
 from pathlib import Path
@@ -5,8 +6,12 @@ from pathlib import Path
 import numpy as np
 import torch
 from sklearn.cluster import KMeans
+from smartem_backend import mq_publisher as mq_publisher_module
 from smartem_backend.model.database import (
+    CurrentQualityPrediction,
     FoilHole,
+    FoilHoleGroup,
+    FoilHoleGroupMembership,
     GridSquare,
     Micrograph,
     QualityMetric,
@@ -16,7 +21,10 @@ from smartem_backend.mq_publisher import (
     publish_create_foilhole_group,
     publish_foilhole_group_model_prediction,
     publish_gridsquare_registered,
+    publish_gridsquare_updated,
 )
+from smartem_backend.rmq import AioPikaPublisher
+from smartem_backend.rmq.config import load_rmq_connection_url
 from smartem_backend.utils import setup_postgres_connection
 from smartem_common.entity_status import GridSquareStatus
 from sqlmodel import Session, select
@@ -35,35 +43,12 @@ model_name = "dae-hole"
 
 
 def _cluster_group_uuid(grid_uuid: str, cluster_index: int) -> str:
-    return str(uuid.uuid5(uuid.UUID(grid_uuid), f"{model_name}:cluster:{cluster_index}"))
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"{grid_uuid}:{model_name}:cluster:{cluster_index}"))
 
 
-def initialise(params: InitParameters) -> None:
-    engine = setup_postgres_connection()
-    with Session(engine) as session:
-        grid_uuid = session.exec(select(GridSquare).where(GridSquare.uuid == params.uuid)).one().grid_uuid
-        grid_squares = session.exec(select(GridSquare).where(GridSquare.grid_uuid == grid_uuid)).all()
-    grid_squares = [gs for gs in grid_squares if gs.image_path]
-    grid_squares = grid_squares[: params.num_squares]
-    if not all(gs.image_path for gs in grid_squares):
-        return None
-
-    square_imgs = []
-    foil_hole_positions = []
-    all_foil_holes = []
-    diameter: int | None = None
-    with Session(engine) as session:
-        for gs in grid_squares:
-            square_imgs.append(Path(gs.image_path))
-            foil_holes = session.exec(select(FoilHole).where(FoilHole.gridsquare_uuid == gs.uuid)).all()
-            foil_holes = [fh for fh in foil_holes if not fh.is_near_grid_bar]
-            all_foil_holes.extend(foil_holes)
-            if diameter is None and foil_holes:
-                diameter = foil_holes[0].diameter
-            foil_hole_positions.append(
-                [(fh.x_location, fh.y_location) for fh in foil_holes if fh.x_location is not None]
-            )
-
+def train_and_infer(
+    params: InitParameters, diameter: float | None, square_imgs, foil_hole_positions, all_foil_holes, grid_uuid, engine
+):
     torch.set_num_threads(params.num_threads)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -124,46 +109,87 @@ def initialise(params: InitParameters) -> None:
     )
     labelled_coords = [(p[0], p[1], q) for p, q in zip(labelled_coords, kmeans.labels_, strict=False)]
 
-    hist = [[0.5 for p in labelled_coords if p[2] == label] for label in range(num_clusters)]
+    if not params.init_scores_from_model:
+        hist = [[0.5 for p in labelled_coords if p[2] == label] for label in range(num_clusters)]
+    else:
+        hist = []
+        with Session(engine) as session:
+            for label in range(num_clusters):
+                other_model_scores_for_cluster = session.exec(
+                    select(FoilHoleGroup, FoilHoleGroupMembership, CurrentQualityPrediction)
+                    .where(FoilHoleGroup.grid_uuid == grid_uuid)
+                    .where(FoilHoleGroup.name == str(label))
+                    .where(FoilHoleGroupMembership.group_uuid == FoilHoleGroup.uuid)
+                    .where(CurrentQualityPrediction.foilhole_uuid == FoilHoleGroupMembership.foilhole_uuid)
+                    .where(CurrentQualityPrediction.prediction_model_name == params.init_scores_from_model)
+                ).all()
+            if len(other_model_scores_for_cluster) < 5:
+                hist.append([0.5 for p in labelled_coords if p[2] == label])
+            else:
+                hist.append([q[2].value for q in other_model_scores_for_cluster])
     largest_cluster = np.max([len(p) for p in hist])
     hist = [np.pad(p, (0, largest_cluster - len(p)), "constant", constant_values=(np.nan, np.nan)) for p in hist]
 
     init_dists = init_distributions(hist)
 
-    if params.model_output_path:
-        torch.save(model.state_dict(), params.model_output_path)
-    if params.kmeans_output_path:
-        with open(params.kmeans_output_path, "wb") as pkl:
+    if params.model_output_dir:
+        torch.save(model.state_dict(), params.model_output_dir / f"{grid_uuid}_{model_name}_model.pt")
+        with open(params.model_output_dir / f"{grid_uuid}_{model_name}_kmeans.pkl", "wb") as pkl:
             pickle.dump(kmeans, pkl)
+
+    return labelled_coords, init_dists
+
+
+async def initialise(params: InitParameters) -> None:
+    engine = setup_postgres_connection()
+    with Session(engine) as session:
+        grid_uuid = session.exec(select(GridSquare).where(GridSquare.uuid == params.uuid)).one().grid_uuid
+        grid_squares = session.exec(select(GridSquare).where(GridSquare.grid_uuid == grid_uuid)).all()
+    grid_squares = [gs for gs in grid_squares if gs.image_path]
+    grid_squares = grid_squares[: params.num_squares]
+    if not all(gs.image_path for gs in grid_squares):
+        return None
+
+    square_imgs = []
+    foil_hole_positions = []
+    all_foil_holes = []
+    diameter: int | None = None
+    with Session(engine) as session:
+        for gs in grid_squares:
+            square_imgs.append(Path(gs.image_path))
+            foil_holes = session.exec(select(FoilHole).where(FoilHole.gridsquare_uuid == gs.uuid)).all()
+            foil_holes = [fh for fh in foil_holes if not fh.is_near_grid_bar]
+            all_foil_holes.extend(foil_holes)
+            if diameter is None and foil_holes:
+                diameter = foil_holes[0].diameter
+            foil_hole_positions.append(
+                [(fh.x_location, fh.y_location) for fh in foil_holes if fh.x_location is not None]
+            )
+
+    labelled_coords, init_dists = await asyncio.to_thread(
+        train_and_infer, params, diameter, square_imgs, foil_hole_positions, all_foil_holes, grid_uuid, engine
+    )
 
     # Create foil hole groups (one per cluster)
     cluster_holes: dict[int, list[str]] = {}
     for lc in labelled_coords:
         cluster_holes.setdefault(int(lc[2]), []).append(lc[0])
 
+    publisher = AioPikaPublisher(
+        url=load_rmq_connection_url(),
+        exchange_name="smartem",
+        routing_key="smartem",
+    )
+    await publisher.connect()
+    mq_publisher_module.set_publisher(publisher)
     for cluster_idx, hole_uuids in cluster_holes.items():
-        publish_create_foilhole_group(
+        await publish_create_foilhole_group(
             grid_uuid=grid_uuid,
             foilhole_uuids=hole_uuids,
             group_uuid=_cluster_group_uuid(grid_uuid, cluster_idx),
         )
 
-    # after writing files used in inference check for grid squares that need to have inference run
-    with Session(engine) as session:
-        registered_grid_squares = session.exec(
-            select(GridSquare)
-            .where(GridSquare.grid_uuid == grid_uuid)
-            .where(GridSquare.status == GridSquareStatus.REGISTERED)
-        ).all()
-    init_square_ids = [gs.uuid for gs in grid_squares]
-    for rs in registered_grid_squares:
-        if rs.uuid not in init_square_ids:
-            try:
-                _ = publish_gridsquare_registered(rs.uuid)
-            except Exception as e:
-                print(e)
-
-    _set_model_parameters(
+    await _set_model_parameters(
         init_dists,
         labelled_coords,
         grid_uuid,
@@ -177,30 +203,44 @@ def initialise(params: InitParameters) -> None:
     for cluster_idx, score_val in enumerate(post_update_scores):
         group_uuid = _cluster_group_uuid(grid_uuid, cluster_idx)
         for metric_name in metric_names:
-            publish_foilhole_group_model_prediction(
+            await publish_foilhole_group_model_prediction(
                 group_uuid=group_uuid,
                 model_name=model_name,
                 prediction_value=score_val,
                 metric=metric_name,
             )
 
+    # after writing files used in inference check for grid squares that need to have inference run
+    with Session(engine) as session:
+        registered_grid_squares = session.exec(
+            select(GridSquare)
+            .where(GridSquare.grid_uuid == grid_uuid)
+            .where(GridSquare.status == GridSquareStatus.REGISTERED)
+        ).all()
+    init_square_ids = [gs.uuid for gs in grid_squares]
+    with Session(engine) as session:
+        for rs in registered_grid_squares:
+            if rs.uuid not in init_square_ids:
+                try:
+                    _ = await publish_gridsquare_registered(rs.uuid)
+                except Exception as e:
+                    print(e)
+            else:
+                rs.status = GridSquareStatus.FOIL_HOLES_DECISION_STARTED
+                session.add(rs)
+                _ = await publish_gridsquare_updated(
+                    uuid=rs.uuid, grid_uuid=rs.grid_uuid, gridsquare_id=rs.gridsquare_id
+                )
+        session.commit()
+
+    await publisher.close()
+
     return None
 
 
-def infer(params: InferenceParameters):
-    if not params.model_path.is_file() or not params.kmeans_path.is_file():
+async def infer(params: InferenceParameters):
+    if not params.model_output_dir.is_dir():
         return None
-    torch.set_num_threads(params.num_threads)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = EIAE(
-        alpha=torch.Tensor([[1.0, 1.0]]).to(device),
-        input_dims=params.input_dim,
-        hidden_dims=params.hidden_dims,
-        lat_dim=params.latent_space_dim,
-    )
-    model.load_state_dict(torch.load(params.model_path, weights_only=True, map_location=device))
-    model.to(device)
-    model.eval()
     engine = setup_postgres_connection()
     foil_hole_positions = []
     all_foil_holes = []
@@ -215,6 +255,21 @@ def infer(params: InferenceParameters):
         if diameter is None:
             diameter = foil_holes[0].diameter
         foil_hole_positions.append([(fh.x_location, fh.y_location) for fh in foil_holes if fh.x_location is not None])
+    model_path = params.model_output_dir / f"{grid_uuid}_{model_name}_model.pt"
+    kmeans_path = params.model_output_dir / f"{grid_uuid}_{model_name}_kmeans.pkl"
+    if not model_path.is_file() or not kmeans_path.is_file():
+        return None
+    torch.set_num_threads(params.num_threads)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = EIAE(
+        alpha=torch.Tensor([[1.0, 1.0]]).to(device),
+        input_dims=params.input_dim,
+        hidden_dims=params.hidden_dims,
+        lat_dim=params.latent_space_dim,
+    )
+    model.load_state_dict(torch.load(model_path, weights_only=True, map_location=device))
+    model.to(device)
+    model.eval()
     if diameter is None:
         return None
     train_x = HoleDataset(
@@ -230,31 +285,50 @@ def infer(params: InferenceParameters):
         coords = model.encode(Variable(sample["x1"]).to(device))[0].detach().cpu().numpy()
         latent_coords[all_foil_holes[i].uuid] = coords[0]
 
-    with open(params.kmeans_path, "rb") as pkl:
+    with open(kmeans_path, "rb") as pkl:
         kmeans = pickle.load(pkl)
+
+    publisher = AioPikaPublisher(
+        url=load_rmq_connection_url(),
+        exchange_name="smartem",
+        routing_key="smartem",
+    )
+    await publisher.connect()
+    mq_publisher_module.set_publisher(publisher)
+
     kmeans.cluster_centers_ = kmeans.cluster_centers_.astype(np.float64)
     cluster_holes: dict[int, list[str]] = {}
     for huuid, coords in latent_coords.items():
         cluster_index = int(kmeans.predict(np.array([coords], dtype=np.float64))[0])
-        _add_cluster_index(grid_uuid, cluster_index, huuid, coords, model=model_name)
+        await _add_cluster_index(grid_uuid, cluster_index, huuid, coords, model=model_name)
         cluster_holes.setdefault(cluster_index, []).append(huuid)
 
     with Session(engine) as session:
         metric_names = [m.name for m in session.exec(select(QualityMetric)).all()]
+
     for cluster_idx, hole_uuids in cluster_holes.items():
-        publish_create_foilhole_group(
+        await publish_create_foilhole_group(
             grid_uuid=grid_uuid,
             foilhole_uuids=hole_uuids,
             group_uuid=_cluster_group_uuid(grid_uuid, cluster_idx),
         )
         for metric_name in metric_names:
             dist = _get_dist(grid_uuid, cluster_idx, metric_name)
-            publish_foilhole_group_model_prediction(
+            await publish_foilhole_group_model_prediction(
                 group_uuid=_cluster_group_uuid(grid_uuid, cluster_idx),
                 model_name=model_name,
                 prediction_value=_score(dist),
                 metric=metric_name,
             )
+
+    with Session(engine) as session:
+        gs = session.exec(select(GridSquare).where(GridSquare.uuid == params.uuid)).one()
+        gs.status = GridSquareStatus.FOIL_HOLES_DECISION_STARTED
+        session.add(gs)
+        session.commit()
+        _ = await publish_gridsquare_updated(uuid=gs.uuid, grid_uuid=gs.grid_uuid, gridsquare_id=gs.gridsquare_id)
+
+    await publisher.close()
 
     return coords
 
@@ -288,7 +362,7 @@ def _score(dist):
     return np.sum(step * midpoints * dist)
 
 
-def update(params: UpdateParameters) -> None:
+async def update(params: UpdateParameters) -> None:
     engine = setup_postgres_connection()
     with Session(engine) as session:
         micrograph_chain = session.exec(
@@ -326,10 +400,21 @@ def update(params: UpdateParameters) -> None:
             )
         session.commit()
 
-    publish_foilhole_group_model_prediction(
+    publisher = AioPikaPublisher(
+        url=load_rmq_connection_url(),
+        exchange_name="smartem",
+        routing_key="smartem",
+    )
+    await publisher.connect()
+    mq_publisher_module.set_publisher(publisher)
+
+    await publish_foilhole_group_model_prediction(
         group_uuid=_cluster_group_uuid(micrograph_chain[0].grid_uuid, cluster_index),
         model_name=model_name,
         prediction_value=_score(dist),
         metric=params.metric_name,
     )
+
+    await publisher.close()
+
     return None
