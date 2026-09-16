@@ -4,8 +4,14 @@ from pathlib import Path
 import numpy as np
 import torch
 from sklearn.cluster import KMeans
-from smartem_backend.model.database import GridSquare, QualityMetric, QualityPredictionModelParameter
-from smartem_backend.mq_publisher import publish_gridsquare_model_prediction, publish_model_parameter_update
+from smartem_backend.model.database import (
+    CurrentQualityPrediction,
+    GridSquare,
+    QualityMetric,
+    QualityPrediction,
+    QualityPredictionModelParameter,
+)
+from smartem_backend.mq_publisher import publish_model_parameter_update
 from smartem_backend.utils import setup_postgres_connection
 from sqlmodel import Session, and_, func, select
 from torch.autograd import Variable
@@ -22,7 +28,7 @@ from smartem_models.utils.parameter_updating_cluster import init_distributions, 
 model_name = "dae-square"
 
 
-def _set_model_parameters(
+async def _set_model_parameters(
     dists: np.array,
     coords: list[tuple[str, tuple[float, float], int]],
     grid_uuid: str,
@@ -35,7 +41,7 @@ def _set_model_parameters(
     for i, d in enumerate(dists):
         for j in range(len(d)):
             for mn in metric_names:
-                publish_model_parameter_update(
+                await publish_model_parameter_update(
                     grid_uuid=grid_uuid,
                     model_name=model,
                     key=str(j),
@@ -44,21 +50,21 @@ def _set_model_parameters(
                     group=f"dist:{i}",
                 )
     for c in coords:
-        publish_model_parameter_update(
+        await publish_model_parameter_update(
             grid_uuid=grid_uuid,
             model_name=model,
             key="x",
             value=float(c[1][0]),
             group=f"coordinates:{c[0]}",
         )
-        publish_model_parameter_update(
+        await publish_model_parameter_update(
             grid_uuid=grid_uuid,
             model_name=model,
             key="y",
             value=float(c[1][1]),
             group=f"coordinates:{c[0]}",
         )
-        publish_model_parameter_update(
+        await publish_model_parameter_update(
             grid_uuid=grid_uuid,
             model_name=model,
             key=str(c[0]),
@@ -68,7 +74,7 @@ def _set_model_parameters(
     return None
 
 
-def initialise(params: InitParameters) -> None:
+async def initialise(params: InitParameters) -> None:
     engine = setup_postgres_connection()
     with Session(engine) as session:
         grid_squares = session.exec(select(GridSquare).where(GridSquare.grid_uuid == params.grid_uuid)).all()
@@ -123,35 +129,34 @@ def initialise(params: InitParameters) -> None:
     hist = [np.pad(p, (0, largest_cluster - len(p)), "constant", constant_values=(np.nan, np.nan)) for p in hist]
     init_dists = init_distributions(hist)
 
-    if params.model_output_path:
-        torch.save(model.state_dict(), params.model_output_path)
-    if params.kmeans_output_path:
-        with open(params.kmeans_output_path, "wb") as pkl:
+    if params.model_output_dir:
+        torch.save(model.state_dict(), params.model_output_dir / f"{params.grid_uuid}_{model_name}_model.pt")
+        with open(params.model_output_dir / f"{params.grid_uuid}_{model_name}_kmeans.pkl", "wb") as pkl:
             pickle.dump(kmeans, pkl)
 
-    _set_model_parameters(init_dists, labelled_coords, params.grid_uuid)
+    await _set_model_parameters(init_dists, labelled_coords, params.grid_uuid)
 
     return None
 
 
-def _add_cluster_index(
+async def _add_cluster_index(
     grid_uuid: str, cluster_index: int, gridsquare: str, coords: np.array, model: str = model_name
 ) -> None:
-    publish_model_parameter_update(
+    await publish_model_parameter_update(
         grid_uuid=grid_uuid,
         model_name=model,
         key="x",
         value=coords[0],
         group=f"coordinates:{gridsquare}",
     )
-    publish_model_parameter_update(
+    await publish_model_parameter_update(
         grid_uuid=grid_uuid,
         model_name=model,
         key="y",
         value=coords[1],
         group=f"coordinates:{gridsquare}",
     )
-    publish_model_parameter_update(
+    await publish_model_parameter_update(
         grid_uuid=grid_uuid,
         model_name=model,
         key=gridsquare,
@@ -161,7 +166,7 @@ def _add_cluster_index(
     return None
 
 
-def infer(params: InferenceParameters):
+async def infer(params: InferenceParameters):
     torch.set_num_threads(params.num_threads)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = EIAE(
@@ -170,14 +175,16 @@ def infer(params: InferenceParameters):
         hidden_dims=params.hidden_dims,
         lat_dim=params.latent_space_dim,
     )
-    model.load_state_dict(torch.load(params.model_path, weights_only=True, map_location=device))
+    model_path = params.model_output_dir / f"{params.grid_uuid}_{model_name}_model.pt"
+    kmeans_path = params.model_output_dir / f"{params.grid_uuid}_{model_name}_kmeans.pkl"
+    model.load_state_dict(torch.load(model_path, weights_only=True, map_location=device))
     model.eval()
     img = transforms.Resize(params.input_dim[-1], antialias=True)(prepare_image(read_img(params.gridsquare_img_path)))
     coords = model(img.unsqueeze(0))[2].detach().cpu().numpy()
-    with open(params.kmeans_path, "rb") as pkl:
+    with open(kmeans_path, "rb") as pkl:
         kmeans = pickle.load(pkl)
     cluster_index = kmeans.predict([coords])
-    _add_cluster_index(params.grid_uuid, cluster_index, params.gridsquare_uuid, coords)
+    await _add_cluster_index(params.grid_uuid, cluster_index, params.gridsquare_uuid, coords)
     return coords
 
 
@@ -227,13 +234,13 @@ def _get_dist(grid_uuid: str, cluster_index: int, num_steps: int = 10) -> np.arr
     return dist
 
 
-def _record_dist(
+async def _record_dist(
     dist: np.array, grid_uuid: str, cluster_index: int, metric_name: str | None = None, model: str = model_name
 ) -> None:
     if np.sum(dist) == 0:
         return None
     for j in range(len(dist)):
-        publish_model_parameter_update(
+        await publish_model_parameter_update(
             grid_uuid=grid_uuid,
             model_name=model,
             key=str(j),
@@ -244,20 +251,55 @@ def _record_dist(
     return None
 
 
-def _record_score(score: float, gridsquare_uuid: str, metric_name: str | None = None, model: str = model_name) -> None:
-    publish_gridsquare_model_prediction(
+async def _record_score(
+    score: float, gridsquare_uuid: str, metric_name: str | None = None, model: str = model_name
+) -> None:
+    quality_prediction = QualityPrediction(
         gridsquare_uuid=gridsquare_uuid,
-        model_name=model,
-        prediction_value=score,
-        metric=metric_name,
+        prediction_model_name=model,
+        value=score,
+        metric_name=metric_name,
     )
+    engine = setup_postgres_connection()
+    with Session(engine) as session:
+        session.add(quality_prediction)
+        current_quality_prediction = (
+            (
+                session.execute(
+                    select(CurrentQualityPrediction)
+                    .where(CurrentQualityPrediction.gridsquare_uuid == gridsquare_uuid)
+                    .where(CurrentQualityPrediction.prediction_model_name == model)
+                    .where(CurrentQualityPrediction.metric_name == metric_name)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if current_quality_prediction is None:
+            grid_uuid = (
+                (session.execute(select(GridSquare).where(GridSquare.uuid == gridsquare_uuid)))
+                .scalars()
+                .one()
+                .grid_uuid
+            )
+            current_quality_prediction = CurrentQualityPrediction(
+                grid_uuid=grid_uuid,
+                gridsquare_uuid=gridsquare_uuid,
+                prediction_model_name=model,
+                value=score,
+                metric_name=metric_name,
+            )
+        else:
+            current_quality_prediction.value = score
+        session.add(current_quality_prediction)
+        session.commit()
     return None
 
 
-def update(params: UpdateParameters) -> None:
+async def update(params: UpdateParameters) -> None:
     dist = _get_dist(params.grid_uuid, params.cluster_index)
     dist = update_distribution_from_prob(dist, params.quality)
-    _record_dist(dist, params.grid_uuid, params.cluster_index)
+    await _record_dist(dist, params.grid_uuid, params.cluster_index)
     post_update_score = score(dist, params.cluster_index)
-    _record_score(post_update_score, params.gridsquare_uuid)
+    await _record_score(post_update_score, params.gridsquare_uuid)
     return None
