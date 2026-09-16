@@ -1,29 +1,23 @@
-import json
 from collections.abc import Callable
-from threading import Thread
 
-from pika.channel import Channel
-from pika.frame import Body, Method
-from pika.spec import BasicProperties
 from pydantic import BaseModel
-from smartem_backend.utils import setup_rabbitmq
+from smartem_backend.rmq import AioPikaConsumer, decode_event_body
+from smartem_backend.rmq.config import load_rmq_connection_url, load_rmq_topology
 
 
-def consume(func: Callable, queue_name: str, message_format: type[BaseModel]):
-    pub, con = setup_rabbitmq(queue_name=queue_name)
+async def consume(func: Callable, queue_name: str, message_format: type[BaseModel]):
+    url = load_rmq_connection_url()
+    exchange_name, _queue_name = load_rmq_topology()
 
-    def on_message(channel: Channel, method: Method, properties: BasicProperties, body: Body):
-        message = message_format(**json.loads(body.decode()))
+    con = AioPikaConsumer(url=url, queue_name=queue_name, exchange_name="", prefetch_count=1)
+    await con.connect()
+
+    async def on_message(message):
+        message_body = decode_event_body(message)
         try:
-
-            def _func_in_thread():
-                func(message)
-                con._connection.add_callback_threadsafe(lambda: channel.basic_ack(method.delivery_tag))
-
-            t = Thread(target=_func_in_thread)
-            t.start()
+            await func(message_format(**message_body))
+            await message.ack()
         except Exception:
-            channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-            return
+            await message.reject(requeue=False)
 
-    con.consume(on_message, prefetch_count=1)
+    await con.consume(on_message)
