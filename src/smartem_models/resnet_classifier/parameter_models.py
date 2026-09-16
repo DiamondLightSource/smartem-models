@@ -7,7 +7,7 @@ class InferenceParameters(BaseModel):
     grid_uuid: str
     model_path: Path
     use_single_image: bool = False
-    cpus: int = 4
+    cpus: int = 2
 
 
 class HoleInferenceParameters(BaseModel):
