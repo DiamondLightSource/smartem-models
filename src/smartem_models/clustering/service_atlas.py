@@ -1,17 +1,25 @@
+import asyncio
 import pickle
 from pathlib import Path
 
 import numpy as np
 import torch
 from sklearn.cluster import KMeans
+from smartem_backend import mq_publisher as mq_publisher_module
 from smartem_backend.model.database import (
+    Atlas,
+    CurrentQualityPrediction,
     FoilHole,
     Grid,
     GridSquare,
     Micrograph,
     QualityMetric,
+    QualityPrediction,
     QualityPredictionModelParameter,
 )
+from smartem_backend.mq_publisher import publish_atlas_model_prediction
+from smartem_backend.rmq import AioPikaPublisher
+from smartem_backend.rmq.config import load_rmq_connection_url
 from smartem_backend.utils import setup_postgres_connection
 from sqlmodel import Session, select
 from torch.autograd import Variable
@@ -33,6 +41,10 @@ def _find_atlas_image(parent: Path) -> Path:
         return mrcs[0]
     if tiffs := list(parent.glob("Atlas_*.tiff")):
         return tiffs[0]
+    if mrcs := list(parent.glob("*_atlas.mrc")):
+        return mrcs[0]
+    if tiffs := list(parent.glob("*_atlas.tiff")):
+        return tiffs[0]
     raise FileNotFoundError(f"No atlas image found in {parent}")
 
 
@@ -42,23 +54,15 @@ def _score(dist):
     return np.sum(step * midpoints * dist)
 
 
-def initialise(params: InitParameters) -> None:
-    engine = setup_postgres_connection()
-    with Session(engine) as session:
-        grid_squares = session.exec(select(GridSquare).where(GridSquare.grid_uuid == params.grid_uuid)).all()
-        atlas_path = _find_atlas_image(
-            Path(session.exec(select(Grid).where(Grid.uuid == params.grid_uuid)).all()[0].atlas_dir).parent
-        )
-        s = int(
-            1.1
-            * np.max([np.max([gs.size_width for gs in grid_squares]), np.max([gs.size_height for gs in grid_squares])])
-        )
-
+def train_and_infer(params: InitParameters, grid_squares, atlas_path, square_width):
     torch.set_num_threads(params.num_threads)
     square_positions = {gs.uuid: (gs.center_x, gs.center_y) for gs in grid_squares if gs.center_x is not None}
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     train_x = SquareAtlasMagDataset(
-        Path(atlas_path), square_positions, s, transform=transforms.Resize(params.input_dim[-1], antialias=True)
+        Path(atlas_path),
+        square_positions,
+        square_width,
+        transform=transforms.Resize(params.input_dim[-1], antialias=True),
     )
     train_dataloader = DataLoader(train_x, batch_size=params.batch_size, shuffle=True, pin_memory=True)
 
@@ -81,6 +85,7 @@ def initialise(params: InitParameters) -> None:
     epoch_losses: list[float] = [10**15]
 
     model.train()
+    params.num_epochs = 150
     for _epoch in range(params.num_epochs):
         loss_record, epoch_loss = train(train_dataloader, model, optimizer, device)
         losses += loss_record
@@ -90,13 +95,15 @@ def initialise(params: InitParameters) -> None:
 
     latent_coords = {}
     for sample in train_dataloader:
-        coords = model.encode(Variable(sample["x1"]).to(device))[0].detach().cpu().numpy()
+        coords = np.nan_to_num(model.encode(Variable(sample["x1"]).to(device))[0].detach().cpu().numpy())
         for i, label in enumerate(sample["lab"].detach().cpu().numpy().flatten()):
             latent_coords[grid_squares[label].uuid] = coords[i]
 
     num_clusters = len(latent_coords) // 5
     if num_clusters > 10:
         num_clusters = 10
+    if not num_clusters:
+        return None
     labelled_coords = list(latent_coords.items())
     kmeans = KMeans(n_clusters=num_clusters, random_state=0, n_init="auto").fit(
         np.array([p[1] for p in labelled_coords])
@@ -107,13 +114,40 @@ def initialise(params: InitParameters) -> None:
     hist = [np.pad(p, (0, largest_cluster - len(p)), "constant", constant_values=(np.nan, np.nan)) for p in hist]
     init_dists = init_distributions(hist)
 
-    if params.model_output_path:
-        torch.save(model.state_dict(), params.model_output_path)
-    if params.kmeans_output_path:
-        with open(params.kmeans_output_path, "wb") as pkl:
+    if params.model_output_dir:
+        torch.save(model.state_dict(), params.model_output_dir / f"{params.grid_uuid}_{model_name}_model.pt")
+        with open(params.model_output_dir / f"{params.grid_uuid}_{model_name}_kmeans.pkl", "wb") as pkl:
             pickle.dump(kmeans, pkl)
 
-    _set_model_parameters(init_dists, labelled_coords, params.grid_uuid, model=model_name)
+    return labelled_coords, init_dists
+
+
+async def initialise(params: InitParameters) -> None:
+    engine = setup_postgres_connection()
+    with Session(engine) as session:
+        atlas = session.exec(select(Atlas).where(Atlas.grid_uuid == params.grid_uuid)).all()[-1]
+        grid_squares = session.exec(select(GridSquare).where(GridSquare.grid_uuid == params.grid_uuid)).all()
+        grid = session.exec(select(Grid).where(Grid.uuid == params.grid_uuid)).all()[0]
+        if Path(grid.atlas_dir).is_dir():
+            atlas_path = Path(grid.atlas_dir) / f"{grid.name}_montage.mrc"
+        else:
+            atlas_path = _find_atlas_image(Path(grid.atlas_dir).parent)
+        s = int(
+            1.1
+            * np.max([np.max([gs.size_width for gs in grid_squares]), np.max([gs.size_height for gs in grid_squares])])
+        )
+
+    labelled_coords, init_dists = await asyncio.to_thread(train_and_infer, params, grid_squares, atlas_path, s)
+
+    publisher = AioPikaPublisher(
+        url=load_rmq_connection_url(),
+        exchange_name="smartem",
+        routing_key="smartem",
+    )
+    await publisher.connect()
+    mq_publisher_module.set_publisher(publisher)
+
+    await _set_model_parameters(init_dists, labelled_coords, params.grid_uuid, model=model_name)
 
     post_update_scores = [_score(dist) for dist in init_dists]
 
@@ -121,7 +155,10 @@ def initialise(params: InitParameters) -> None:
         metric_names = [m.name for m in session.exec(select(QualityMetric)).all()]
     for lc in labelled_coords:
         for metric_name in metric_names:
-            _record_score(post_update_scores[lc[2]], lc[0], metric_name=metric_name, model=model_name)
+            await _record_score(post_update_scores[lc[2]], lc[0], metric_name=metric_name, model=model_name)
+
+    await publish_atlas_model_prediction(atlas.uuid, -1, model_name=model_name)
+    await publisher.close()
 
     return None
 
@@ -149,7 +186,7 @@ def _get_dist(grid_uuid: str, cluster_index: int, metric_name: str | None = None
     return dist
 
 
-def update(params: UpdateParameters) -> None:
+async def update(params: UpdateParameters) -> None:
     engine = setup_postgres_connection()
     with Session(engine) as session:
         micrograph_chain = session.exec(
@@ -199,7 +236,41 @@ def update(params: UpdateParameters) -> None:
         session.commit()
 
     post_update_score = _score(dist)
-    for gs in grid_squares:
-        _record_score(post_update_score, gs, metric_name=params.metric_name, model=model_name)
+
+    engine = setup_postgres_connection()
+    with Session(engine) as session:
+        for gs in sorted(grid_squares):
+            quality_prediction = QualityPrediction(
+                gridsquare_uuid=gs,
+                prediction_model_name=model_name,
+                value=post_update_score,
+                metric_name=params.metric_name,
+            )
+            session.add(quality_prediction)
+            current_quality_prediction = (
+                (
+                    session.execute(
+                        select(CurrentQualityPrediction)
+                        .where(CurrentQualityPrediction.gridsquare_uuid == gs)
+                        .where(CurrentQualityPrediction.prediction_model_name == model_name)
+                        .where(CurrentQualityPrediction.metric_name == params.metric_name)
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if current_quality_prediction is None:
+                grid_uuid = (session.execute(select(GridSquare).where(GridSquare.uuid == gs))).scalars().one().grid_uuid
+                current_quality_prediction = CurrentQualityPrediction(
+                    grid_uuid=grid_uuid,
+                    gridsquare_uuid=gs,
+                    prediction_model_name=model_name,
+                    value=post_update_score,
+                    metric_name=params.metric_name,
+                )
+            else:
+                current_quality_prediction.value = post_update_score
+            session.add(current_quality_prediction)
+        session.commit()
 
     return None
