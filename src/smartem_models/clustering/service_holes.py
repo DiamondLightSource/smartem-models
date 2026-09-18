@@ -27,7 +27,7 @@ from smartem_backend.rmq import AioPikaPublisher
 from smartem_backend.rmq.config import load_rmq_connection_url
 from smartem_backend.utils import setup_postgres_connection
 from smartem_common.entity_status import GridSquareStatus
-from sqlmodel import Session, select
+from sqlmodel import Session, and_, func, select
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from torchvision import transforms
@@ -335,24 +335,38 @@ async def infer(params: InferenceParameters):
 
 def _get_dist(grid_uuid: str, cluster_index: int, metric_name: str | None = None, num_steps: int = 10) -> np.array:
     engine = setup_postgres_connection()
+    keys = [str(k) for k in range(num_steps)]
+    common_filters = (
+        QualityPredictionModelParameter.grid_uuid == grid_uuid,
+        QualityPredictionModelParameter.prediction_model_name == model_name,
+        QualityPredictionModelParameter.group == f"dist:{int(cluster_index)}",
+        QualityPredictionModelParameter.metric_name == metric_name,  # noqa: E711
+        QualityPredictionModelParameter.key.in_(keys),
+    )
     with Session(engine) as session:
-        model_parameters = []
-        for key in range(num_steps):
-            model_parameters.append(
-                session.exec(
-                    select(QualityPredictionModelParameter)
-                    .where(QualityPredictionModelParameter.grid_uuid == grid_uuid)
-                    .where(QualityPredictionModelParameter.prediction_model_name == model_name)
-                    .where(QualityPredictionModelParameter.group == f"dist:{int(cluster_index)}")
-                    .where(QualityPredictionModelParameter.metric_name == metric_name)
-                    .where(QualityPredictionModelParameter.key == str(key))
-                    .order_by(QualityPredictionModelParameter.timestamp.desc())
-                ).first()
+        latest_per_key = (
+            select(
+                func.max(QualityPredictionModelParameter.timestamp).label("most_recent"),
+                QualityPredictionModelParameter.key,
             )
+            .where(*common_filters)
+            .group_by(QualityPredictionModelParameter.key)
+            .subquery()
+        )
+        model_parameters = session.exec(
+            select(QualityPredictionModelParameter)
+            .join(
+                latest_per_key,
+                and_(
+                    QualityPredictionModelParameter.key == latest_per_key.c.key,
+                    QualityPredictionModelParameter.timestamp == latest_per_key.c.most_recent,
+                ),
+            )
+            .where(*common_filters)
+        ).all()
     dist = np.zeros(num_steps)
     for mp in model_parameters:
-        if mp is not None:
-            dist[int(mp.key)] = mp.value
+        dist[int(mp.key)] = mp.value
     return dist
 
 
