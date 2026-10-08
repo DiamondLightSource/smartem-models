@@ -179,6 +179,7 @@ async def initialise(params: InitParameters) -> None:
         url=load_rmq_connection_url(),
         exchange_name="smartem",
         routing_key="smartem",
+        exchange_type="fanout",
     )
     await publisher.connect()
     mq_publisher_module.set_publisher(publisher)
@@ -217,6 +218,7 @@ async def initialise(params: InitParameters) -> None:
             .where(GridSquare.grid_uuid == grid_uuid)
             .where(GridSquare.status == GridSquareStatus.REGISTERED)
         ).all()
+
     init_square_ids = [gs.uuid for gs in grid_squares]
     with Session(engine) as session:
         for rs in registered_grid_squares:
@@ -292,6 +294,7 @@ async def infer(params: InferenceParameters):
         url=load_rmq_connection_url(),
         exchange_name="smartem",
         routing_key="smartem",
+        exchange_type="fanout",
     )
     await publisher.connect()
     mq_publisher_module.set_publisher(publisher)
@@ -366,7 +369,8 @@ def _get_dist(grid_uuid: str, cluster_index: int, metric_name: str | None = None
         ).all()
     dist = np.zeros(num_steps)
     for mp in model_parameters:
-        dist[int(mp.key)] = mp.value
+        if mp is not None:
+            dist[int(mp.key)] = mp.value
     return dist
 
 
@@ -418,6 +422,7 @@ async def update(params: UpdateParameters) -> None:
         url=load_rmq_connection_url(),
         exchange_name="smartem",
         routing_key="smartem",
+        exchange_type="fanout",
     )
     await publisher.connect()
     mq_publisher_module.set_publisher(publisher)

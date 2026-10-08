@@ -63,6 +63,7 @@ async def infer(params: HoleInferenceParameters) -> None:
 
     img_transform = models.ResNet18_Weights.IMAGENET1K_V1.transforms()
 
+
     if diameter is None:
         return None
 
@@ -100,6 +101,7 @@ async def infer(params: HoleInferenceParameters) -> None:
         url=load_rmq_connection_url(),
         exchange_name="smartem",
         routing_key="smartem",
+        exchange_type="fanout",
     )
     await publisher.connect()
     mq_publisher_module.set_publisher(publisher)

@@ -155,6 +155,7 @@ async def initialise(params: InitParameters) -> None:
         url=load_rmq_connection_url(),
         exchange_name="smartem",
         routing_key="smartem",
+        exchange_type="fanout",
     )
     await publisher.connect()
     mq_publisher_module.set_publisher(publisher)
@@ -269,6 +270,7 @@ async def update(params: UpdateParameters) -> None:
         url=load_rmq_connection_url(),
         exchange_name="smartem",
         routing_key="smartem",
+        exchange_type="fanout",
     )
     await publisher.connect()
     mq_publisher_module.set_publisher(publisher)
