@@ -6,7 +6,6 @@ from pathlib import Path
 import numpy as np
 import torch
 from sklearn.cluster import KMeans
-from smartem_backend import mq_publisher as mq_publisher_module
 from smartem_backend.model.database import (
     CurrentQualityPrediction,
     FoilHole,
@@ -23,8 +22,6 @@ from smartem_backend.mq_publisher import (
     publish_gridsquare_registered,
     publish_gridsquare_updated,
 )
-from smartem_backend.rmq import AioPikaPublisher
-from smartem_backend.rmq.config import load_rmq_connection_url
 from smartem_backend.utils import setup_postgres_connection
 from smartem_common.entity_status import GridSquareStatus
 from sqlmodel import Session, and_, func, select
@@ -175,14 +172,6 @@ async def initialise(params: InitParameters) -> None:
     for lc in labelled_coords:
         cluster_holes.setdefault(int(lc[2]), []).append(lc[0])
 
-    publisher = AioPikaPublisher(
-        url=load_rmq_connection_url(),
-        exchange_name="smartem",
-        routing_key="smartem",
-        exchange_type="fanout",
-    )
-    await publisher.connect()
-    mq_publisher_module.set_publisher(publisher)
     for cluster_idx, hole_uuids in cluster_holes.items():
         await publish_create_foilhole_group(
             grid_uuid=grid_uuid,
@@ -234,8 +223,6 @@ async def initialise(params: InitParameters) -> None:
                     uuid=rs.uuid, grid_uuid=rs.grid_uuid, gridsquare_id=rs.gridsquare_id
                 )
         session.commit()
-
-    await publisher.close()
 
     return None
 
@@ -290,15 +277,6 @@ async def infer(params: InferenceParameters):
     with open(kmeans_path, "rb") as pkl:
         kmeans = pickle.load(pkl)
 
-    publisher = AioPikaPublisher(
-        url=load_rmq_connection_url(),
-        exchange_name="smartem",
-        routing_key="smartem",
-        exchange_type="fanout",
-    )
-    await publisher.connect()
-    mq_publisher_module.set_publisher(publisher)
-
     kmeans.cluster_centers_ = kmeans.cluster_centers_.astype(np.float64)
     cluster_holes: dict[int, list[str]] = {}
     for huuid, coords in latent_coords.items():
@@ -330,8 +308,6 @@ async def infer(params: InferenceParameters):
         session.add(gs)
         session.commit()
         _ = await publish_gridsquare_updated(uuid=gs.uuid, grid_uuid=gs.grid_uuid, gridsquare_id=gs.gridsquare_id)
-
-    await publisher.close()
 
     return coords
 
@@ -418,22 +394,11 @@ async def update(params: UpdateParameters) -> None:
             )
         session.commit()
 
-    publisher = AioPikaPublisher(
-        url=load_rmq_connection_url(),
-        exchange_name="smartem",
-        routing_key="smartem",
-        exchange_type="fanout",
-    )
-    await publisher.connect()
-    mq_publisher_module.set_publisher(publisher)
-
     await publish_foilhole_group_model_prediction(
         group_uuid=_cluster_group_uuid(micrograph_chain[0].grid_uuid, cluster_index),
         model_name=model_name,
         prediction_value=_score(dist),
         metric=params.metric_name,
     )
-
-    await publisher.close()
 
     return None

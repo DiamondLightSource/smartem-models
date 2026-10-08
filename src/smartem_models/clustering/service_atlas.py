@@ -6,7 +6,6 @@ from pathlib import Path
 import numpy as np
 import torch
 from sklearn.cluster import KMeans
-from smartem_backend import mq_publisher as mq_publisher_module
 from smartem_backend.model.database import (
     Atlas,
     FoilHole,
@@ -21,8 +20,6 @@ from smartem_backend.mq_publisher import (
     publish_create_gridsquare_group,
     publish_gridsquare_group_model_prediction,
 )
-from smartem_backend.rmq import AioPikaPublisher
-from smartem_backend.rmq.config import load_rmq_connection_url
 from smartem_backend.utils import setup_postgres_connection
 from sqlmodel import Session, and_, func, select
 from torch.autograd import Variable
@@ -151,14 +148,6 @@ async def initialise(params: InitParameters) -> None:
     for lc in labelled_coords:
         cluster_gridsquares.setdefault(int(lc[2]), []).append(lc[0])
 
-    publisher = AioPikaPublisher(
-        url=load_rmq_connection_url(),
-        exchange_name="smartem",
-        routing_key="smartem",
-        exchange_type="fanout",
-    )
-    await publisher.connect()
-    mq_publisher_module.set_publisher(publisher)
     for cluster_idx, gridsquare_uuids in cluster_gridsquares.items():
         await publish_create_gridsquare_group(
             grid_uuid=params.grid_uuid,
@@ -183,8 +172,6 @@ async def initialise(params: InitParameters) -> None:
             )
 
     await publish_atlas_model_prediction(atlas.uuid, -1, model_name=model_name)
-    await publisher.close()
-
     return None
 
 
@@ -266,22 +253,11 @@ async def update(params: UpdateParameters) -> None:
 
     post_update_score = _score(dist)
 
-    publisher = AioPikaPublisher(
-        url=load_rmq_connection_url(),
-        exchange_name="smartem",
-        routing_key="smartem",
-        exchange_type="fanout",
-    )
-    await publisher.connect()
-    mq_publisher_module.set_publisher(publisher)
-
     await publish_gridsquare_group_model_prediction(
         group_uuid=_cluster_group_uuid(grid_uuid, cluster_index),
         model_name=model_name,
         prediction_value=post_update_score,
         metric=params.metric_name,
     )
-
-    await publisher.close()
 
     return None

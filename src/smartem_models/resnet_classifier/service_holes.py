@@ -4,11 +4,8 @@ import mrcfile
 import numpy as np
 import tifffile
 import torch
-from smartem_backend import mq_publisher as mq_publisher_module
 from smartem_backend.model.database import FoilHole, GridSquare
 from smartem_backend.mq_publisher import publish_foilhole_model_prediction, publish_gridsquare_updated
-from smartem_backend.rmq import AioPikaPublisher
-from smartem_backend.rmq.config import load_rmq_connection_url
 from smartem_backend.utils import setup_postgres_connection
 from sqlmodel import Session, select
 from torchvision import models
@@ -63,7 +60,6 @@ async def infer(params: HoleInferenceParameters) -> None:
 
     img_transform = models.ResNet18_Weights.IMAGENET1K_V1.transforms()
 
-
     if diameter is None:
         return None
 
@@ -97,24 +93,11 @@ async def infer(params: HoleInferenceParameters) -> None:
 
         scores[h] = score
 
-    publisher = AioPikaPublisher(
-        url=load_rmq_connection_url(),
-        exchange_name="smartem",
-        routing_key="smartem",
-        exchange_type="fanout",
+    for k, v in scores.items():
+        await publish_foilhole_model_prediction(foilhole_uuid=k, model_name=model_name, prediction_value=v)
+
+    _ = await publish_gridsquare_updated(
+        uuid=grid_square.uuid, grid_uuid=grid_square.grid_uuid, gridsquare_id=grid_square.gridsquare_id
     )
-    await publisher.connect()
-    mq_publisher_module.set_publisher(publisher)
-
-    try:
-        for k, v in scores.items():
-            await publish_foilhole_model_prediction(foilhole_uuid=k, model_name=model_name, prediction_value=v)
-
-        _ = await publish_gridsquare_updated(
-            uuid=grid_square.uuid, grid_uuid=grid_square.grid_uuid, gridsquare_id=grid_square.gridsquare_id
-        )
-
-    finally:
-        await publisher.close()
 
     return None

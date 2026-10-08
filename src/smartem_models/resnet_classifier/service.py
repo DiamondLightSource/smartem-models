@@ -3,13 +3,10 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from smartem_backend import mq_publisher as mq_publisher_module
 from smartem_backend.model.database import Atlas, Grid
 from smartem_backend.mq_publisher import publish_atlas_model_prediction, publish_gridsquare_model_prediction
-from smartem_backend.rmq import AioPikaPublisher
 
 # from smartem_models.utils import publish_with_retry
-from smartem_backend.rmq.config import load_rmq_connection_url
 from smartem_backend.utils import setup_postgres_connection
 from sqlmodel import Session, select
 from torchvision import models, transforms
@@ -102,19 +99,9 @@ async def infer(params: InferenceParameters) -> None:
 
     scores = await asyncio.to_thread(run_inference, gs_positions, model, img_transform)
 
-    publisher = AioPikaPublisher(
-        url=load_rmq_connection_url(),
-        exchange_name="smartem",
-        routing_key="smartem",
-        exchange_type="fanout",
-    )
-    await publisher.connect()
-    mq_publisher_module.set_publisher(publisher)
-
     for k, v in scores.items():
         await publish_gridsquare_model_prediction(gridsquare_uuid=k, model_name=model_name, prediction_value=v)
     await publish_atlas_model_prediction(atlas.uuid, float(np.mean(list(scores.values()))), model_name=model_name)
-    await publisher.close()
 
     return None
 
